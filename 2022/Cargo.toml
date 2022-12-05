@@ -1,5 +1,5 @@
 [package]
-name = "dec1"
+name = "advent-of-code-2022"
 version = "0.1.0"
 edition = "2021"
 
@@ -28,3 +28,7 @@ path = "src/dec3/main.rs"
 [[bin]]
 name = "dec4"
 path = "src/dec4/main.rs"
+
+[[bin]]
+name = "dec5"
+path = "src/dec5/main.rs"
