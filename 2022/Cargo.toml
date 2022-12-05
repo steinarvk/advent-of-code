@@ -1,0 +1,30 @@
+[package]
+name = "dec1"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.66"
+itertools = "0.10.5"
+
+[[bin]]
+name = "dec1"
+path = "src/dec1/main.rs"
+
+[[bin]]
+name = "dec2"
+path = "src/dec2/main.rs"
+
+[[bin]]
+name = "dec2-2"
+path = "src/dec2-2/main.rs"
+
+[[bin]]
+name = "dec3"
+path = "src/dec3/main.rs"
+
+[[bin]]
+name = "dec4"
+path = "src/dec4/main.rs"
