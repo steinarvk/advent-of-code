@@ -1,24 +1,29 @@
 use std::collections::HashSet;
-use std::slice::Windows;
+use std::io::Read;
 
 type Result<T> = std::result::Result<T, anyhow::Error>;
 
-fn find_marker(s: &str) -> Option<usize> {
+fn find_marker(s: &str, n: usize) -> Option<usize> {
     s.as_bytes()
-        .windows(4)
+        .windows(n)
         .enumerate()
-        .filter(|(_, s)| HashSet::<&u8>::from_iter(s.iter()).len() == 4)
+        .filter(|(_, s)| HashSet::<&u8>::from_iter(s.iter()).len() == n)
         .next()
-        .map(|(i, _)| i + 4)
+        .map(|(i, _)| i + n)
 }
 
 fn main() -> Result<()> {
-    let total: usize = std::io::stdin()
-        .lines()
-        .map(|line| find_marker(line.unwrap().trim()).expect("expected marker"))
-        .sum();
+    let mut s = String::new();
+    std::io::stdin().read_to_string(&mut s)?;
 
-    println!("Total chars: {}", total);
+    println!(
+        "Start marker: {}",
+        find_marker(&s, 4).expect("expected marker")
+    );
+    println!(
+        "End marker: {}",
+        find_marker(&s, 14).expect("expected marker")
+    );
 
     Ok(())
 }
