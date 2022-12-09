@@ -4,9 +4,9 @@ use std::collections::HashSet;
 type Result<T> = std::result::Result<T, anyhow::Error>;
 
 fn char_value(x: char) -> i32 {
-    if x >= 'a' && x <= 'z' {
+    if ('a'..='z').contains(&x) {
         (x as i32) - ('a' as i32) + 1
-    } else if x >= 'A' && x <= 'Z' {
+    } else if ('A'..='Z').contains(&x) {
         (x as i32) - ('A' as i32) + 27
     } else {
         panic!("no value specified for {}", x)

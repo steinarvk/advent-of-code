@@ -5,7 +5,7 @@ type Result<T> = std::result::Result<T, anyhow::Error>;
 
 fn parse_interval(s: &str) -> Result<RangeInclusive<i32>> {
     let (start, end) = s
-        .split_once("-")
+        .split_once('-')
         .ok_or_else(|| anyhow!("invalid range {}", s))?;
     let start = start.parse::<i32>()?;
     let end = end.parse::<i32>()?;
@@ -13,11 +13,11 @@ fn parse_interval(s: &str) -> Result<RangeInclusive<i32>> {
 }
 
 fn range_contains(a: &RangeInclusive<i32>, b: &RangeInclusive<i32>) -> bool {
-    a.contains(&b.start()) && a.contains(&b.end())
+    a.contains(b.start()) && a.contains(b.end())
 }
 
 fn range_overlaps(a: &RangeInclusive<i32>, b: &RangeInclusive<i32>) -> bool {
-    a.contains(&b.start()) || a.contains(&b.end()) || range_contains(b, a)
+    a.contains(b.start()) || a.contains(b.end()) || range_contains(b, a)
 }
 
 fn main() -> Result<()> {
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
         }
 
         let (first, second) = line
-            .split_once(",")
+            .split_once(',')
             .ok_or_else(|| anyhow!("invalid range-pair: {}", line))?;
 
         let first = parse_interval(first)?;

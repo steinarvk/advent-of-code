@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow};
 use itertools::Itertools;
 
 type Result<T> = std::result::Result<T, anyhow::Error>;
@@ -22,9 +22,9 @@ fn parse_stacks(lines: &[String]) -> Result<Vec<Vec<char>>> {
             }
 
             let contents = chunk
-                .strip_prefix("[")
+                .strip_prefix('[')
                 .ok_or_else(|| anyhow!("does not have expected format: {}", chunk))?
-                .strip_suffix("]")
+                .strip_suffix(']')
                 .ok_or_else(|| anyhow!("does not have expected format: {}", chunk))?
                 .chars()
                 .next()
@@ -71,10 +71,7 @@ fn main() -> Result<()> {
                 let target_stack = target_stack.parse::<usize>()? - 1;
 
                 let n = stacks_9001[origin_stack].len();
-                let moved_9001: Vec<char> = stacks_9001[origin_stack][n - number_of_crates..]
-                    .iter()
-                    .map(|x| *x)
-                    .collect();
+                let moved_9001: Vec<char> = stacks_9001[origin_stack][n - number_of_crates..].to_vec();
 
                 stacks_9001[target_stack].extend(moved_9001);
 

@@ -23,7 +23,7 @@ fn main() -> Result<()> {
                 path_stack.pop();
             }
             ["$", "cd", subdirectory] => {
-                let current_path: &str = &path_stack.last().unwrap();
+                let current_path: &str = path_stack.last().unwrap();
                 path_stack.push(format!(
                     "{}{}{}",
                     current_path,

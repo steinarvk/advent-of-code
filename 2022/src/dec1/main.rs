@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     println!("Max 1: {}", totals.last().unwrap());
     println!(
         "Max 3: {}",
-        (&totals[totals.len() - 3..]).iter().sum::<i32>()
+        totals[totals.len() - 3..].iter().sum::<i32>()
     );
 
     Ok(())

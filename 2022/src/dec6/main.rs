@@ -6,9 +6,7 @@ type Result<T> = std::result::Result<T, anyhow::Error>;
 fn find_marker(s: &str, n: usize) -> Option<usize> {
     s.as_bytes()
         .windows(n)
-        .enumerate()
-        .filter(|(_, s)| HashSet::<&u8>::from_iter(s.iter()).len() == n)
-        .next()
+        .enumerate().find(|(_, s)| HashSet::<&u8>::from_iter(s.iter()).len() == n)
         .map(|(i, _)| i + n)
 }
 

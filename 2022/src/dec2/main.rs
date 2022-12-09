@@ -70,7 +70,7 @@ fn main() -> Result<()> {
 
     for line in std::io::stdin().lines() {
         let line = line?;
-        let (them, second_column) = line.split_once(" ").unwrap();
+        let (them, second_column) = line.split_once(' ').unwrap();
         let them = match them {
             "A" => Symbol::Rock,
             "B" => Symbol::Paper,
