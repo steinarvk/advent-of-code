@@ -8,7 +8,7 @@ use std::io::Read;
 #[derive(Debug)]
 enum Atom {
     OldValue,
-    Literal(i32),
+    Literal(i64),
 }
 
 #[derive(Debug)]
@@ -18,7 +18,7 @@ enum Expr {
 }
 
 impl Atom {
-    fn eval(&self, old_value: i32) -> i32 {
+    fn eval(&self, old_value: i64) -> i64 {
         match *self {
             Atom::OldValue => old_value,
             Atom::Literal(x) => x,
@@ -27,7 +27,7 @@ impl Atom {
 }
 
 impl Expr {
-    fn eval(&self, old_value: i32) -> i32 {
+    fn eval(&self, old_value: i64) -> i64 {
         match self {
             Expr::Add(a, b) => a.eval(old_value) + b.eval(old_value),
             Expr::Mul(a, b) => a.eval(old_value) * b.eval(old_value),
@@ -59,16 +59,19 @@ fn parse_expr(s: &str) -> Result<Expr> {
 #[derive(Debug)]
 struct Monkey {
     index: usize,
-    inspect_count: i32,
+    inspect_count: i64,
     expr: Expr,
-    items: VecDeque<i32>,
-    divisor: i32,
+    items: VecDeque<i64>,
+    divisor: i64,
     target_if_divisible: usize,
     target_if_not_divisible: usize,
 }
 
 fn run_round(monkeys: &mut Vec<Monkey>) -> Result<()> {
-    let mut item_queue: Vec<VecDeque<i32>> = monkeys.iter().map(|_| VecDeque::new()).collect();
+    let product_of_divisors: i64 = monkeys.iter().map(|x| x.divisor).product();
+    println!("Product of divisors: {}", product_of_divisors);
+
+    let mut item_queue: Vec<VecDeque<i64>> = monkeys.iter().map(|_| VecDeque::new()).collect();
 
     for monkey in monkeys.iter_mut() {
         println!("Monkey {}'s turn.", monkey.index);
@@ -84,8 +87,11 @@ fn run_round(monkeys: &mut Vec<Monkey>) -> Result<()> {
             println!("Monkey inspecting new item with worry level {}.", worry);
             let worry = monkey.expr.eval(worry);
             println!("Worry level adjusted to {}.", worry);
-            let worry = worry / 3;
-            println!("Worry level divided by 3 to {}.", worry);
+            //let worry = worry / 3;
+            // println!("Worry level divided by 3 to {}.", worry);
+
+            let worry = worry % product_of_divisors;
+            println!("Worry level simplified to {}.", worry);
 
             let divisible = worry % monkey.divisor == 0;
             println!("Divisible by {}? {}", monkey.divisor, divisible);
@@ -130,7 +136,7 @@ fn main() -> Result<()> {
                 items: VecDeque::from_iter(
                     captures["items"]
                         .split(",")
-                        .map(|x| x.trim().parse::<i32>().unwrap()),
+                        .map(|x| x.trim().parse::<i64>().unwrap()),
                 ),
                 divisor: captures["divisor"].parse().unwrap(),
                 target_if_divisible: captures["yes"].parse().unwrap(),
@@ -139,20 +145,20 @@ fn main() -> Result<()> {
         })
         .collect();
 
-    for _ in 0..20 {
+    for _ in 0..10000 {
         run_round(&mut monkeys)?;
     }
 
-    let mut counts: Vec<i32> = monkeys.iter().map(|x| x.inspect_count).collect();
+    let mut counts: Vec<i64> = monkeys.iter().map(|x| x.inspect_count).collect();
     counts.sort();
 
     println!("All counts: {:?}", counts);
 
-    let most_active_counts: Vec<i32> = counts.iter().rev().take(2).map(|x| *x).collect();
+    let most_active_counts: Vec<i64> = counts.iter().rev().take(2).map(|x| *x).collect();
 
     println!("Most active counts: {:?}", most_active_counts);
 
-    println!("Product: {}", most_active_counts.iter().product::<i32>());
+    println!("Product: {}", most_active_counts.iter().product::<i64>());
 
     Ok(())
 }
