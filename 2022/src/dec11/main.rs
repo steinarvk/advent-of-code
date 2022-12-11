@@ -42,7 +42,7 @@ fn parse_atom(s: &str) -> Result<Atom> {
 }
 
 fn parse_expr(s: &str) -> Result<Expr> {
-    let tokens: Vec<&str> = s.trim().split_whitespace().collect();
+    let tokens: Vec<&str> = s.split_whitespace().collect();
 
     assert!(tokens.len() == 3);
 
@@ -67,16 +67,12 @@ struct Monkey {
     target_if_not_divisible: usize,
 }
 
-fn run_round(monkeys: &mut Vec<Monkey>) -> Result<()> {
+fn run_round(monkeys: &mut [Monkey], divide_worry: bool) -> Result<()> {
     let product_of_divisors: i64 = monkeys.iter().map(|x| x.divisor).product();
-    println!("Product of divisors: {}", product_of_divisors);
 
     let mut item_queue: Vec<VecDeque<i64>> = monkeys.iter().map(|_| VecDeque::new()).collect();
 
     for monkey in monkeys.iter_mut() {
-        println!("Monkey {}'s turn.", monkey.index);
-
-        println!("Incoming items: {:?}", item_queue[monkey.index]);
         monkey.items.append(&mut item_queue[monkey.index]);
         item_queue[monkey.index] = VecDeque::new();
 
@@ -84,27 +80,19 @@ fn run_round(monkeys: &mut Vec<Monkey>) -> Result<()> {
             monkey.inspect_count += 1;
 
             let worry = monkey.items.pop_front().unwrap();
-            println!("Monkey inspecting new item with worry level {}.", worry);
             let worry = monkey.expr.eval(worry);
-            println!("Worry level adjusted to {}.", worry);
-            //let worry = worry / 3;
-            // println!("Worry level divided by 3 to {}.", worry);
-
-            let worry = worry % product_of_divisors;
-            println!("Worry level simplified to {}.", worry);
-
+            let worry = if divide_worry {
+                worry / 3
+            } else {
+                worry % product_of_divisors
+            };
             let divisible = worry % monkey.divisor == 0;
-            println!("Divisible by {}? {}", monkey.divisor, divisible);
 
             let target_monkey = if divisible {
                 monkey.target_if_divisible
             } else {
                 monkey.target_if_not_divisible
             };
-            println!(
-                "Throwing item with worry level {} to monkey {}",
-                worry, target_monkey
-            );
 
             item_queue[target_monkey].push_back(worry);
         }
@@ -117,14 +105,10 @@ fn run_round(monkeys: &mut Vec<Monkey>) -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
-    let mut buffer = String::new();
-
-    std::io::stdin().read_to_string(&mut buffer)?;
-
+fn run_scenario(spec: &str, rounds: usize, divide: bool) -> Result<i64> {
     let re = Regex::new(r"Monkey (?P<index>[0-9]+):.*\n.*Starting items: (?P<items>.*)\n.*Operation: new = (?P<expr>.*)\n.*Test: divisible by (?P<divisor>[0-9]+)\n.*If true: throw to monkey (?P<yes>[0-9]+).*\n.*If false: throw to monkey (?P<no>[0-9]+)").unwrap();
 
-    let mut monkeys: Vec<Monkey> = buffer
+    let mut monkeys: Vec<Monkey> = spec
         .split("\n\n")
         .map(|text| {
             let captures = re.captures(text.trim()).unwrap();
@@ -135,7 +119,7 @@ fn main() -> Result<()> {
                 expr: parse_expr(&captures["expr"]).unwrap(),
                 items: VecDeque::from_iter(
                     captures["items"]
-                        .split(",")
+                        .split(',')
                         .map(|x| x.trim().parse::<i64>().unwrap()),
                 ),
                 divisor: captures["divisor"].parse().unwrap(),
@@ -145,20 +129,24 @@ fn main() -> Result<()> {
         })
         .collect();
 
-    for _ in 0..10000 {
-        run_round(&mut monkeys)?;
+    for _ in 0..rounds {
+        run_round(&mut monkeys, divide)?;
     }
 
     let mut counts: Vec<i64> = monkeys.iter().map(|x| x.inspect_count).collect();
     counts.sort();
 
-    println!("All counts: {:?}", counts);
+    let most_active_counts: Vec<i64> = counts.iter().rev().take(2).copied().collect();
 
-    let most_active_counts: Vec<i64> = counts.iter().rev().take(2).map(|x| *x).collect();
+    Ok(most_active_counts.iter().product::<i64>())
+}
 
-    println!("Most active counts: {:?}", most_active_counts);
+fn main() -> Result<()> {
+    let mut buffer = String::new();
+    std::io::stdin().read_to_string(&mut buffer)?;
 
-    println!("Product: {}", most_active_counts.iter().product::<i64>());
+    println!("Part A: {}", run_scenario(&buffer, 20, true)?);
+    println!("Part A: {}", run_scenario(&buffer, 10_000, false)?);
 
     Ok(())
 }
