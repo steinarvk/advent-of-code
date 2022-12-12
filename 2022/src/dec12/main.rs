@@ -42,21 +42,6 @@ impl<T> Map<T>
 where
     T: Clone,
 {
-    fn new(number_of_columns: i32, number_of_rows: i32, starting_value: &T) -> Map<T> {
-        let row_data = (0..number_of_rows)
-            .map(|_| {
-                (0..number_of_columns)
-                    .map(|_| starting_value.clone())
-                    .collect()
-            })
-            .collect();
-        Map {
-            number_of_rows,
-            number_of_columns,
-            row_data,
-        }
-    }
-
     fn at(&self, (col, row): (i32, i32)) -> Option<&T> {
         if row < 0 || row >= self.number_of_rows || col < 0 || col >= self.number_of_columns {
             return None;
