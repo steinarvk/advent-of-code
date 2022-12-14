@@ -1,40 +1,9 @@
 type Result<T> = std::result::Result<T, anyhow::Error>;
 
-use std::io::Read;
-
 struct Map<T> {
     number_of_rows: i32,
     number_of_columns: i32,
     row_data: Vec<Vec<T>>,
-}
-
-impl Map<char> {
-    fn from_stdin() -> Result<Map<char>> {
-        let mut buffer = String::new();
-        std::io::stdin().read_to_string(&mut buffer)?;
-        Map::from_string(&buffer)
-    }
-
-    fn from_string(s: &str) -> Result<Map<char>> {
-        let rows: Vec<&str> = s.trim().split('\n').collect();
-        let number_of_rows = rows.len();
-        let number_of_cols = rows[0].len();
-
-        if !(rows.iter().all(|s| s.trim().len() == number_of_cols)) {
-            anyhow::bail!("rows are not all the same length");
-        }
-
-        let row_data = rows
-            .iter()
-            .map(|row| row.trim().chars().collect())
-            .collect();
-
-        Ok(Map {
-            number_of_rows: number_of_rows.try_into().unwrap(),
-            number_of_columns: number_of_cols.try_into().unwrap(),
-            row_data,
-        })
-    }
 }
 
 impl<T> Map<T>
@@ -96,41 +65,6 @@ where
             number_of_columns: self.number_of_columns,
             row_data,
         }
-    }
-
-    fn in_bounds(&self, (col, row): (i32, i32)) -> bool {
-        !(row < 0 || row >= self.number_of_rows || col < 0 || col >= self.number_of_columns)
-    }
-
-    fn neighbours(&self, (col, row): (i32, i32)) -> Vec<(i32, i32)> {
-        [(0, -1), (0, 1), (-1, 0), (1, 0)]
-            .iter()
-            .filter_map(|(dx, dy)| {
-                let p = (col + dx, row + dy);
-                if self.in_bounds(p) {
-                    Some(p)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    fn find(&self, needle: T) -> Vec<(i32, i32)>
-    where
-        T: PartialEq,
-    {
-        let mut rv: Vec<(i32, i32)> = Vec::new();
-
-        for (y, row) in self.row_data.iter().enumerate() {
-            for (x, value) in row.iter().enumerate() {
-                if *value == needle {
-                    rv.push((x.try_into().unwrap(), y.try_into().unwrap()));
-                }
-            }
-        }
-
-        rv
     }
 
     fn map<F, B>(&self, f: F) -> Map<B>
