@@ -243,7 +243,7 @@ fn solve(nodes: &[Node], starting_position: usize, use_elephant: bool) -> Result
     while !q.is_empty() {
         iteration_count += 1;
 
-        let state = q.pop_front().unwrap();
+        let state = q.pop_back().unwrap();
 
         max_observed_score = state.score.max(max_observed_score);
 
