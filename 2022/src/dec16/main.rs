@@ -335,7 +335,7 @@ fn distance_matrix(nodes: &[Node]) -> Vec<Vec<Option<i32>>> {
 
 fn parse_scenario(s: String) -> Result<(Vec<Node>, usize)> {
     let re = Regex::new(
-        r"Valve (?P<name>[A-Z]+) has flow rate=(?P<rate>[0-9]+); tunnels? leads? to valves? (?P<out>[A-Z, ]+)",
+        r"Valve (?P<name>[A-Z0-9]+) has flow rate=(?P<rate>[0-9]+); tunnels? leads? to valves? (?P<out>[A-Z0-9, ]+)",
     )?;
 
     let lines: Vec<String> = s.trim().split('\n').map(|line| line.to_string()).collect();
