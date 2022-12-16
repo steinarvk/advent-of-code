@@ -24,30 +24,10 @@ impl ScoreMemo {
         }
     }
 
-    fn update_with_elephant(&mut self, state: &StateWithElephant) -> bool {
+    fn update(&mut self, state: &State) -> bool {
         let (p0, p1) = state.positions;
         let canonical_pos = (p0.min(p1), p0.max(p1));
         let key = (canonical_pos, state.on);
-
-        let value: &mut [Option<i64>; MAX_NUMBER_OF_MINUTES] = self
-            .memo
-            .entry(key)
-            .or_insert_with(|| [None; MAX_NUMBER_OF_MINUTES]);
-
-        for t in 0..=state.time {
-            if let Some(previous_score) = value[t] {
-                if previous_score >= state.score {
-                    return false;
-                }
-            }
-        }
-
-        value[state.time] = Some(state.score);
-        true
-    }
-
-    fn update(&mut self, state: &State) -> bool {
-        let key = ((state.position, 0), state.on);
 
         let value: &mut [Option<i64>; MAX_NUMBER_OF_MINUTES] = self
             .memo
@@ -70,26 +50,20 @@ impl ScoreMemo {
 #[derive(Debug)]
 struct State {
     time: usize,
-    position: usize,
-    on: [bool; MAX_NODES],
-    score: i64,
-}
-
-#[derive(Debug)]
-struct StateWithElephant {
-    time: usize,
     positions: (usize, usize),
     on: [bool; MAX_NODES],
     score: i64,
+    use_elephant: bool,
 }
 
-impl StateWithElephant {
-    fn initial_state(starting_position: usize) -> StateWithElephant {
-        StateWithElephant {
-            time: 0,
+impl State {
+    fn initial_state(starting_position: usize, use_elephant: bool) -> State {
+        State {
+            time: if use_elephant { 4 } else { 0 },
             positions: (starting_position, starting_position),
             on: [false; MAX_NODES],
             score: 0,
+            use_elephant,
         }
     }
 
@@ -126,7 +100,7 @@ impl StateWithElephant {
     }
 
     fn minutes_left(&self) -> usize {
-        MAX_NUMBER_OF_MINUTES - (self.time + 1) - 4
+        MAX_NUMBER_OF_MINUTES - (self.time + 1)
     }
 
     fn upper_bound_for_score(&self, nodes: &[Node], distance_matrix: &[Vec<Option<i32>>]) -> i64 {
@@ -159,20 +133,16 @@ impl StateWithElephant {
         upper_bound_extra_score + self.score
     }
 
-    fn next_states(
-        &self,
-        nodes: &[Node],
-        distance_matrix: &[Vec<Option<i32>>],
-    ) -> Vec<StateWithElephant> {
+    fn next_states(&self, nodes: &[Node], distance_matrix: &[Vec<Option<i32>>]) -> Vec<State> {
         assert!(nodes.len() <= MAX_NODES);
         assert!(self.time < MAX_NUMBER_OF_MINUTES);
 
         let my_node = &nodes[self.positions.0];
         let its_node = &nodes[self.positions.1];
 
-        let minutes_left_to_flow_after_current_turn = MAX_NUMBER_OF_MINUTES - (self.time + 1) - 4;
+        let minutes_left_to_flow_after_current_turn = MAX_NUMBER_OF_MINUTES - (self.time + 1);
 
-        let mut rv: Vec<StateWithElephant> = Vec::new();
+        let mut rv: Vec<State> = Vec::new();
 
         let mut my_possible_actions: Vec<(usize, i64)> = Vec::new();
         let mut its_possible_actions: Vec<(usize, i64)> = Vec::new();
@@ -220,6 +190,10 @@ impl StateWithElephant {
             its_possible_actions.push((self.positions.1, extra_score));
         }
 
+        if !self.use_elephant {
+            its_possible_actions = vec![(0, 0)];
+        }
+
         let mut position_pairs: HashSet<(usize, usize)> = HashSet::new();
 
         for (my_next_pos, _) in &my_possible_actions {
@@ -255,11 +229,12 @@ impl StateWithElephant {
                     new_on[self.positions.1] = true;
                 }
 
-                rv.push(StateWithElephant {
+                rv.push(State {
                     time: self.time + 1,
                     positions: (p0, p1),
                     on: new_on,
                     score: self.score + my_extra_score + its_extra_score,
+                    use_elephant: self.use_elephant,
                 });
             }
         }
@@ -268,91 +243,7 @@ impl StateWithElephant {
     }
 }
 
-impl State {
-    fn initial_state(starting_position: usize) -> State {
-        State {
-            time: 0,
-            position: starting_position,
-            on: [false; MAX_NODES],
-            score: 0,
-        }
-    }
-
-    fn next_states(&self, nodes: &[Node]) -> Vec<State> {
-        assert!(nodes.len() <= MAX_NODES);
-        assert!(self.time < MAX_NUMBER_OF_MINUTES);
-
-        let node = &nodes[self.position];
-
-        let mut rv: Vec<State> = Vec::new();
-
-        // Move
-        for next_node in &node.paths {
-            rv.push(State {
-                time: self.time + 1,
-                position: *next_node,
-                on: self.on,
-                score: self.score,
-            });
-        }
-
-        if node.rate > 0 && !self.on[self.position] {
-            // Turn on
-            let mut new_on = self.on;
-            new_on[self.position] = true;
-
-            let minutes_left = MAX_NUMBER_OF_MINUTES - (self.time + 1);
-            let extra_score = node.rate * (minutes_left as i64);
-
-            rv.push(State {
-                time: self.time + 1,
-                position: self.position,
-                on: new_on,
-                score: self.score + extra_score,
-            });
-        }
-
-        rv
-    }
-}
-
-fn solve_part_one(nodes: &[Node], starting_position: usize, time_limit: usize) -> Result<i64> {
-    let mut iteration_count: u64 = 0;
-
-    let mut max_score: i64 = 0;
-
-    let mut memo = ScoreMemo::new();
-
-    let mut q = VecDeque::new();
-    q.push_back(State::initial_state(starting_position));
-
-    while !q.is_empty() {
-        iteration_count += 1;
-
-        let state = q.pop_front().unwrap();
-        max_score = state.score.max(max_score);
-
-        if state.time >= (time_limit - 1) {
-            continue;
-        }
-
-        for new_state in state.next_states(nodes) {
-            if memo.update(&new_state) {
-                q.push_back(new_state);
-            }
-        }
-    }
-
-    println!("Done after {} iterations.", iteration_count);
-    println!(
-        "Max score (without elephant) after {} minutes: {}",
-        time_limit, max_score
-    );
-
-    Ok(max_score)
-}
-
-fn solve_part_two(nodes: &[Node], starting_position: usize, time_limit: usize) -> Result<i64> {
+fn solve(nodes: &[Node], starting_position: usize, use_elephant: bool) -> Result<i64> {
     let distances = distance_matrix(nodes);
 
     let mut iteration_count: u64 = 0;
@@ -362,7 +253,9 @@ fn solve_part_two(nodes: &[Node], starting_position: usize, time_limit: usize) -
     let mut memo = ScoreMemo::new();
 
     let mut q = VecDeque::new();
-    q.push_back(StateWithElephant::initial_state(starting_position));
+    q.push_back(State::initial_state(starting_position, use_elephant));
+
+    let starting_time = q[0].time;
 
     while !q.is_empty() {
         iteration_count += 1;
@@ -389,21 +282,23 @@ fn solve_part_two(nodes: &[Node], starting_position: usize, time_limit: usize) -
             );
         }
 
-        if state.time >= (time_limit - 1) {
+        if state.time >= (MAX_NUMBER_OF_MINUTES - 1) {
             continue;
         }
 
         for new_state in state.next_states(nodes, &distances) {
-            if memo.update_with_elephant(&new_state) {
+            if memo.update(&new_state) {
                 q.push_back(new_state);
             }
         }
     }
 
-    println!("Done after {} iterations.", iteration_count);
-    println!(
-        "Max score (with elephant) after {} minutes: {}",
-        time_limit, max_observed_score
+    eprintln!("Done after {} iterations.", iteration_count);
+    eprintln!(
+        "Max score (with elephant? {}) after {} minutes: {}",
+        use_elephant,
+        MAX_NUMBER_OF_MINUTES - starting_time,
+        max_observed_score
     );
 
     Ok(max_observed_score)
@@ -477,9 +372,14 @@ fn main() -> Result<()> {
 
     println!("AA = {}", starting_position);
 
-    solve_part_one(&nodes, starting_position, 30)?;
-
-    solve_part_two(&nodes, starting_position, 26)?;
+    println!(
+        "Answer to first question: {}",
+        solve(&nodes, starting_position, false)?
+    );
+    println!(
+        "Answer to second question: {}",
+        solve(&nodes, starting_position, true)?
+    );
 
     Ok(())
 }
