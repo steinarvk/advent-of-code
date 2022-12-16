@@ -95,18 +95,22 @@ impl StateWithElephant {
 
     fn move_is_pointless(
         &self,
-        _distances: &Vec<Vec<Option<i32>>>,
-        _before: usize,
-        _after: usize,
-        _time_left: usize,
+        distances: &[Vec<Option<i32>>],
+        before: usize,
+        after: usize,
+        time_left: usize,
     ) -> bool {
         // This optimization doesn't actually seem to matter much.
-        /*
-        let rv = self
-            .on
+        self.on
             .iter()
             .enumerate()
-            .filter_map(|(i, v)| if !v { Some(i) } else { None })
+            .filter_map(|(i, v)| {
+                if !v && i < distances.len() {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
             .filter(|i| {
                 let distance_before = distances[before][*i].unwrap();
                 let distance_after = distances[after][*i].unwrap();
@@ -117,21 +121,14 @@ impl StateWithElephant {
                 pointful
             })
             .next()
-            .is_none();
-        rv
-        */
-        false
+            .is_none()
     }
 
     fn minutes_left(&self) -> usize {
         MAX_NUMBER_OF_MINUTES - (self.time + 1) - 4
     }
 
-    fn upper_bound_for_score(
-        &self,
-        nodes: &[Node],
-        distance_matrix: &Vec<Vec<Option<i32>>>,
-    ) -> i64 {
+    fn upper_bound_for_score(&self, nodes: &[Node], distance_matrix: &[Vec<Option<i32>>]) -> i64 {
         let minutes_left: i64 = self.minutes_left() as i64;
 
         let upper_bound_extra_score = self
@@ -147,65 +144,24 @@ impl StateWithElephant {
                     .unwrap()
                     .min(distance_matrix[self.positions.1][i].unwrap());
 
-                // println!("min(Distance({}, {}), Distance({}, {})) = {}", self.positions.0, i, self.positions.1, i, distance);
-
                 let minutes_flowing = minutes_left - (distance as i64);
 
                 if minutes_flowing <= 0 {
                     return None;
                 }
 
-                let potential = nodes[i].rate * minutes_flowing;
-                // println!("t={}, left={}: potential for turning on {}, which is {} away: flow for {} at rate {} ==> {}", self.time, minutes_left, i, distance, minutes_flowing, nodes[i].rate, potential);
-
-                Some(potential)
+                Some(nodes[i].rate * minutes_flowing)
             })
             .sum::<i64>();
-
-        if upper_bound_extra_score < 0 {
-            self
-            .on
-            .iter()
-            .enumerate()
-            .filter_map(|(i, on)| {
-                if *on || i >= nodes.len() || nodes[i].rate == 0 {
-                    return None;
-                }
-
-                let distance = distance_matrix[self.positions.0][i]
-                    .unwrap()
-                    .min(distance_matrix[self.positions.1][i].unwrap());
-
-                println!("min(Distance({}, {}), Distance({}, {})) = {}", self.positions.0, i, self.positions.1, i, distance);
-
-                let minutes_flowing = minutes_left - (distance as i64);
-
-                let potential = nodes[i].rate * minutes_flowing;
-                println!("t={}, left={}: potential for turning on {}, which is {} away: flow for {} at rate {} ==> {}", self.time, minutes_left, i, distance, minutes_flowing, nodes[i].rate, potential);
-
-                Some(potential)
-            })
-            .sum::<i64>();
-        }
-
         assert!(upper_bound_extra_score >= 0);
 
         upper_bound_extra_score + self.score
-
-        /*
-        println!(
-            "Upper bound for score: {} (current score) + {} (potential) = {}",
-            self.score,
-            ub - self.score,
-            ub
-        );
-        */
     }
 
     fn next_states(
         &self,
         nodes: &[Node],
-        distance_matrix: &Vec<Vec<Option<i32>>>,
+        distance_matrix: &[Vec<Option<i32>>],
     ) -> Vec<StateWithElephant> {
         assert!(nodes.len() <= MAX_NODES);
         assert!(self.time < MAX_NUMBER_OF_MINUTES);
@@ -390,25 +346,6 @@ fn solve_part_one(nodes: &[Node], starting_position: usize, time_limit: usize) -
 fn solve_part_two(nodes: &[Node], starting_position: usize, time_limit: usize) -> Result<i64> {
     let distances = distance_matrix(nodes);
 
-    /*
-    assert!(distances[1][27].unwrap() + distances[27][43].unwrap() >= distances[1][43].unwrap());
-    assert!(distances[1][27].unwrap() == distances[27][1].unwrap());
-
-    println!("Distance(1, 43) = {}", distances[1][43].unwrap());
-    println!("Distance(1, 26) = {}", distances[1][26].unwrap());
-    println!("Distance(1, 27) = {}", distances[1][27].unwrap());
-    println!("Distance(26, 43) = {}", distances[26][43].unwrap());
-    println!("Distance(27, 43) = {}", distances[27][43].unwrap());
-    */
-
-    /*
-    for (i, idists) in distances.iter().enumerate() {
-        for (j, dist) in idists.iter().enumerate() {
-            println!("Distance({}, {}) = {}", i, j, dist.unwrap());
-        }
-    }
-    */
-
     let mut iteration_count: u64 = 0;
 
     let mut max_observed_score: i64 = 0;
@@ -427,13 +364,6 @@ fn solve_part_two(nodes: &[Node], starting_position: usize, time_limit: usize) -
 
         let score_upper_bound = state.upper_bound_for_score(nodes, &distances);
 
-        /*
-        println!(
-            "state now: {:?}, score-upper-bound: {}",
-            state, score_upper_bound
-        );
-        */
-
         if score_upper_bound < max_observed_score {
             continue;
         }
@@ -451,34 +381,11 @@ fn solve_part_two(nodes: &[Node], starting_position: usize, time_limit: usize) -
             );
         }
 
+        if state.time >= (time_limit - 1) {
+            continue;
+        }
+
         for new_state in state.next_states(nodes, &distances) {
-            let score_upper_bound_after = new_state.upper_bound_for_score(nodes, &distances);
-
-            if score_upper_bound_after > score_upper_bound {
-                println!("WTF happened? {:?} to {:?}", state, new_state);
-                println!(
-                    "Old: t={} pos={:?} score={}",
-                    state.time, state.positions, state.score
-                );
-                println!(
-                    "New: t={} pos={:?} score={}",
-                    new_state.time, new_state.positions, new_state.score
-                );
-                println!(
-                    "Old upper bound: {}",
-                    state.upper_bound_for_score(nodes, &distances)
-                );
-                println!(
-                    "New upper bound: {}",
-                    new_state.upper_bound_for_score(nodes, &distances)
-                );
-                panic!("oops");
-            }
-
-            if new_state.time >= (time_limit - 1) {
-                continue;
-            }
-
             if memo.update_with_elephant(&new_state) {
                 q.push_back(new_state);
             }
