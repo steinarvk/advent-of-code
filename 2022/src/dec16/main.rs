@@ -2,6 +2,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::io::Read;
 
 type Result<T> = std::result::Result<T, anyhow::Error>;
 
@@ -332,16 +333,17 @@ fn distance_matrix(nodes: &[Node]) -> Vec<Vec<Option<i32>>> {
     (0..nodes.len()).map(|i| distances_from(nodes, i)).collect()
 }
 
-fn main() -> Result<()> {
+fn parse_scenario(s: String) -> Result<(Vec<Node>, usize)> {
     let re = Regex::new(
         r"Valve (?P<name>[A-Z]+) has flow rate=(?P<rate>[0-9]+); tunnels? leads? to valves? (?P<out>[A-Z, ]+)",
     )?;
 
+    let lines: Vec<String> = s.trim().split('\n').map(|line| line.to_string()).collect();
+
     let mut name_to_index: HashMap<String, usize> = HashMap::new();
     let mut nodes: Vec<(i64, Vec<String>)> = Vec::new();
 
-    for line in std::io::stdin().lines() {
-        let line = line?;
+    for line in lines {
         let captures = re.captures(line.trim()).unwrap();
         let name: String = captures["name"].to_string();
         let rate: i64 = captures["rate"].parse().unwrap();
@@ -368,7 +370,197 @@ fn main() -> Result<()> {
 
     let starting_position: usize = name_to_index["AA"];
 
-    println!("AA = {}", starting_position);
+    Ok((nodes, starting_position))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_test(s: &str, with_elephant: bool) -> Result<i64> {
+        let (nodes, starting_position) = parse_scenario(s.to_string())?;
+        solve(&nodes, starting_position, with_elephant)
+    }
+
+    #[test]
+    fn simple_scenario_with_elephants() {
+        assert_eq!(
+            run_test(
+                r#"
+Valve AA has flow rate=10; tunnels lead to valves BB, CC
+Valve BB has flow rate=100; tunnels lead to valves AA
+Valve CC has flow rate=100; tunnels lead to valves AA
+"#,
+                true
+            )
+            .unwrap(),
+            5020,
+        );
+    }
+
+    #[test]
+    fn simple_scenario_without_elephants() {
+        assert_eq!(
+            run_test(
+                r#"
+Valve AA has flow rate=10; tunnels lead to valves BB, CC
+Valve BB has flow rate=100; tunnels lead to valves AA
+Valve CC has flow rate=100; tunnels lead to valves AA
+"#,
+                false
+            )
+            .unwrap(),
+            5530,
+        );
+    }
+
+    #[test]
+    fn trivial_scenario() {
+        assert_eq!(
+            run_test(
+                r#"
+Valve AA has flow rate=1; tunnels lead to valves BB
+Valve BB has flow rate=0; tunnels lead to valves AA
+"#,
+                false
+            )
+            .unwrap(),
+            29,
+        );
+    }
+
+    #[test]
+    fn trivial_scenario_with_elephant() {
+        assert_eq!(
+            run_test(
+                r#"
+Valve AA has flow rate=1; tunnels lead to valves BB
+Valve BB has flow rate=0; tunnels lead to valves AA
+"#,
+                true
+            )
+            .unwrap(),
+            25,
+        );
+    }
+
+    #[test]
+    fn scenario_from_question_text_part_one() {
+        assert_eq!(
+            run_test(
+                r#"
+Valve AA has flow rate=0; tunnels lead to valves DD, II, BB
+Valve BB has flow rate=13; tunnels lead to valves CC, AA
+Valve CC has flow rate=2; tunnels lead to valves DD, BB
+Valve DD has flow rate=20; tunnels lead to valves CC, AA, EE
+Valve EE has flow rate=3; tunnels lead to valves FF, DD
+Valve FF has flow rate=0; tunnels lead to valves EE, GG
+Valve GG has flow rate=0; tunnels lead to valves FF, HH
+Valve HH has flow rate=22; tunnel leads to valve GG
+Valve II has flow rate=0; tunnels lead to valves AA, JJ
+Valve JJ has flow rate=21; tunnel leads to valve II
+"#,
+                false
+            )
+            .unwrap(),
+            1651,
+        );
+    }
+
+    #[test]
+    fn scenario_from_question_text_part_two() {
+        assert_eq!(
+            run_test(
+                r#"
+Valve AA has flow rate=0; tunnels lead to valves DD, II, BB
+Valve BB has flow rate=13; tunnels lead to valves CC, AA
+Valve CC has flow rate=2; tunnels lead to valves DD, BB
+Valve DD has flow rate=20; tunnels lead to valves CC, AA, EE
+Valve EE has flow rate=3; tunnels lead to valves FF, DD
+Valve FF has flow rate=0; tunnels lead to valves EE, GG
+Valve GG has flow rate=0; tunnels lead to valves FF, HH
+Valve HH has flow rate=22; tunnel leads to valve GG
+Valve II has flow rate=0; tunnels lead to valves AA, JJ
+Valve JJ has flow rate=21; tunnel leads to valve II
+"#,
+                true
+            )
+            .unwrap(),
+            1707,
+        );
+    }
+
+    const REAL_INPUT: &str = r#"
+Valve JC has flow rate=0; tunnels lead to valves XS, XK
+Valve TK has flow rate=0; tunnels lead to valves AA, RA
+Valve PY has flow rate=0; tunnels lead to valves UB, MW
+Valve XK has flow rate=15; tunnels lead to valves CD, JC, TP, UE
+Valve EI has flow rate=6; tunnels lead to valves UB, HD
+Valve OV has flow rate=0; tunnels lead to valves QC, WK
+Valve CX has flow rate=3; tunnels lead to valves ZN, AM, OE, YS, QE
+Valve YS has flow rate=0; tunnels lead to valves QC, CX
+Valve DC has flow rate=0; tunnels lead to valves UE, NM
+Valve EA has flow rate=5; tunnels lead to valves QE, XO, GX
+Valve VE has flow rate=0; tunnels lead to valves YH, NM
+Valve RN has flow rate=0; tunnels lead to valves WK, NU
+Valve VJ has flow rate=0; tunnels lead to valves QC, CS
+Valve HD has flow rate=0; tunnels lead to valves JI, EI
+Valve UB has flow rate=0; tunnels lead to valves EI, PY
+Valve XS has flow rate=17; tunnels lead to valves JC, CE
+Valve AM has flow rate=0; tunnels lead to valves NU, CX
+Valve GX has flow rate=0; tunnels lead to valves EA, RA
+Valve UI has flow rate=0; tunnels lead to valves NC, ZG
+Valve NM has flow rate=22; tunnels lead to valves DC, VE, DX
+Valve CE has flow rate=0; tunnels lead to valves XS, WD
+Valve NC has flow rate=25; tunnels lead to valves UI, VQ
+Valve TP has flow rate=0; tunnels lead to valves XK, RA
+Valve ZN has flow rate=0; tunnels lead to valves CX, XI
+Valve CS has flow rate=0; tunnels lead to valves AA, VJ
+Valve MW has flow rate=23; tunnel leads to valve PY
+Valve AA has flow rate=0; tunnels lead to valves TK, WC, CS, AL, MS
+Valve RA has flow rate=4; tunnels lead to valves WD, TP, TK, GX, JI
+Valve NU has flow rate=10; tunnels lead to valves DU, AM, RN, HS, AL
+Valve QE has flow rate=0; tunnels lead to valves CX, EA
+Valve AH has flow rate=0; tunnels lead to valves WK, MS
+Valve YH has flow rate=20; tunnels lead to valves VE, CD
+Valve SH has flow rate=0; tunnels lead to valves DU, ZG
+Valve OE has flow rate=0; tunnels lead to valves WC, CX
+Valve XO has flow rate=0; tunnels lead to valves EA, ZG
+Valve JI has flow rate=0; tunnels lead to valves RA, HD
+Valve XI has flow rate=0; tunnels lead to valves WK, ZN
+Valve HS has flow rate=0; tunnels lead to valves QC, NU
+Valve VQ has flow rate=0; tunnels lead to valves WK, NC
+Valve UE has flow rate=0; tunnels lead to valves XK, DC
+Valve YP has flow rate=19; tunnel leads to valve DX
+Valve WD has flow rate=0; tunnels lead to valves CE, RA
+Valve DX has flow rate=0; tunnels lead to valves NM, YP
+Valve ZG has flow rate=11; tunnels lead to valves UI, SH, XO
+Valve MS has flow rate=0; tunnels lead to valves AA, AH
+Valve QC has flow rate=9; tunnels lead to valves HS, VJ, OV, YS
+Valve DU has flow rate=0; tunnels lead to valves NU, SH
+Valve WK has flow rate=12; tunnels lead to valves RN, XI, VQ, OV, AH
+Valve CD has flow rate=0; tunnels lead to valves YH, XK
+Valve AL has flow rate=0; tunnels lead to valves AA, NU
+Valve WC has flow rate=0; tunnels lead to valves OE, AA
+"#;
+
+    #[test]
+    fn real_input_part_one() {
+        assert_eq!(run_test(REAL_INPUT, false).unwrap(), 1754);
+    }
+
+    #[test]
+    fn real_input_part_two() {
+        // This one can be kind of slow.
+        assert_eq!(run_test(REAL_INPUT, true).unwrap(), 2474);
+    }
+}
+
+fn main() -> Result<()> {
+    let mut s = String::new();
+    std::io::stdin().read_to_string(&mut s)?;
+
+    let (nodes, starting_position) = parse_scenario(s)?;
 
     println!(
         "Answer to first question: {}",
