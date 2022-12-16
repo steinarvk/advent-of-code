@@ -13,8 +13,11 @@ struct Node {
     rate: i64,
 }
 
+type ValveStates = [bool; MAX_NODES];
+type CachedScores = [Option<i64>; MAX_NUMBER_OF_MINUTES];
+
 struct ScoreMemo {
-    memo: HashMap<((usize, usize), [bool; MAX_NODES]), [Option<i64>; MAX_NUMBER_OF_MINUTES]>,
+    memo: HashMap<((usize, usize), ValveStates), CachedScores>,
 }
 
 impl ScoreMemo {
@@ -34,11 +37,9 @@ impl ScoreMemo {
             .entry(key)
             .or_insert_with(|| [None; MAX_NUMBER_OF_MINUTES]);
 
-        for maybe_old_score in value.iter().take(state.time + 1) {
-            if let Some(previous_score) = maybe_old_score {
-                if *previous_score >= state.score {
-                    return false;
-                }
+        for previous_score in value.iter().take(state.time + 1).flatten() {
+            if *previous_score >= state.score {
+                return false;
             }
         }
 
@@ -51,7 +52,7 @@ impl ScoreMemo {
 struct State {
     time: usize,
     positions: (usize, usize),
-    on: [bool; MAX_NODES],
+    on: ValveStates,
     score: i64,
     use_elephant: bool,
 }
@@ -75,7 +76,7 @@ impl State {
         time_left: usize,
     ) -> bool {
         // This optimization doesn't actually seem to matter much.
-        let conclusion = self
+        !self
             .on
             .iter()
             .enumerate()
@@ -86,17 +87,14 @@ impl State {
                     None
                 }
             })
-            .filter(|i| {
-                let distance_before = distances[before][*i].unwrap();
-                let distance_after = distances[after][*i].unwrap();
+            .any(|i| {
+                let distance_before = distances[before][i].unwrap();
+                let distance_after = distances[after][i].unwrap();
                 let progress = distance_before - distance_after;
                 let max_steps_left = time_left - 1; // Also need 1min to toggle.
                 let has_enough_time = distance_before <= max_steps_left.try_into().unwrap();
                 progress > 0 && has_enough_time
             })
-            .next()
-            .is_none();
-        conclusion
     }
 
     fn minutes_left(&self) -> usize {
