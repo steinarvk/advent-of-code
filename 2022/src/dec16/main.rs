@@ -101,7 +101,8 @@ impl StateWithElephant {
         time_left: usize,
     ) -> bool {
         // This optimization doesn't actually seem to matter much.
-        self.on
+        let conclusion = self
+            .on
             .iter()
             .enumerate()
             .filter_map(|(i, v)| {
@@ -117,11 +118,11 @@ impl StateWithElephant {
                 let progress = distance_before - distance_after;
                 let max_steps_left = time_left - 1; // Also need 1min to toggle.
                 let has_enough_time = distance_before <= max_steps_left.try_into().unwrap();
-                let pointful = progress > 0 && has_enough_time;
-                pointful
+                progress > 0 && has_enough_time
             })
             .next()
-            .is_none()
+            .is_none();
+        conclusion
     }
 
     fn minutes_left(&self) -> usize {
@@ -176,16 +177,6 @@ impl StateWithElephant {
         let mut my_possible_actions: Vec<(usize, i64)> = Vec::new();
         let mut its_possible_actions: Vec<(usize, i64)> = Vec::new();
 
-        if my_node.rate > 0 && !self.on[self.positions.0] {
-            let extra_score = my_node.rate * (minutes_left_to_flow_after_current_turn as i64);
-            my_possible_actions.push((self.positions.0, extra_score));
-        }
-
-        if its_node.rate > 0 && !self.on[self.positions.1] {
-            let extra_score = its_node.rate * (minutes_left_to_flow_after_current_turn as i64);
-            its_possible_actions.push((self.positions.1, extra_score));
-        }
-
         for my_next_node in &my_node.paths {
             let pointless = self.move_is_pointless(
                 distance_matrix,
@@ -209,6 +200,24 @@ impl StateWithElephant {
             if !pointless {
                 its_possible_actions.push((*its_next_node, 0));
             }
+        }
+
+        if my_possible_actions.is_empty() {
+            my_possible_actions.push((self.positions.0, 0));
+        }
+
+        if its_possible_actions.is_empty() {
+            its_possible_actions.push((self.positions.1, 0));
+        }
+
+        if my_node.rate > 0 && !self.on[self.positions.0] {
+            let extra_score = my_node.rate * (minutes_left_to_flow_after_current_turn as i64);
+            my_possible_actions.push((self.positions.0, extra_score));
+        }
+
+        if its_node.rate > 0 && !self.on[self.positions.1] {
+            let extra_score = its_node.rate * (minutes_left_to_flow_after_current_turn as i64);
+            its_possible_actions.push((self.positions.1, extra_score));
         }
 
         let mut position_pairs: HashSet<(usize, usize)> = HashSet::new();
@@ -363,7 +372,6 @@ fn solve_part_two(nodes: &[Node], starting_position: usize, time_limit: usize) -
         max_observed_score = state.score.max(max_observed_score);
 
         let score_upper_bound = state.upper_bound_for_score(nodes, &distances);
-
         if score_upper_bound < max_observed_score {
             continue;
         }
