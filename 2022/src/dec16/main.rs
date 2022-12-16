@@ -34,9 +34,9 @@ impl ScoreMemo {
             .entry(key)
             .or_insert_with(|| [None; MAX_NUMBER_OF_MINUTES]);
 
-        for t in 0..=state.time {
-            if let Some(previous_score) = value[t] {
-                if previous_score >= state.score {
+        for maybe_old_score in value.iter().take(state.time + 1) {
+            if let Some(previous_score) = maybe_old_score {
+                if *previous_score >= state.score {
                     return false;
                 }
             }
