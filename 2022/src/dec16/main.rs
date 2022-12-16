@@ -297,14 +297,11 @@ fn distances_from(nodes: &[Node], start: usize) -> Vec<Option<i32>> {
     visited[start] = true;
 
     while let Some((distance, index)) = q.pop_front() {
-        rv[index] = match rv[index] {
-            Some(old_distance) => Some(old_distance.min(distance)),
-            None => Some(distance),
-        };
-        visited[index] = true;
+        rv[index] = Some(distance);
 
         for next_index in &nodes[index].paths {
             if !visited[*next_index] {
+                visited[*next_index] = true;
                 q.push_back((distance + 1, *next_index));
             }
         }
@@ -537,6 +534,28 @@ Valve WC has flow rate=0; tunnels lead to valves OE, AA
     fn real_input_part_two() {
         // This one can be kind of slow.
         assert_eq!(run_test(REAL_INPUT, true).unwrap(), 2474);
+    }
+
+    #[test]
+    fn test_distance_map() {
+        let (nodes, _) = parse_scenario(REAL_INPUT.to_string()).unwrap();
+        let distances = distance_matrix(&nodes);
+        let n = nodes.len();
+
+        for i in 0..n {
+            assert_eq!(distances[i][i], Some(0));
+
+            for j in 0..n {
+                assert_eq!(distances[i][j], distances[j][i]);
+
+                for k in 0..n {
+                    assert!(
+                        distances[i][k].unwrap() + distances[k][j].unwrap()
+                            >= distances[i][j].unwrap()
+                    );
+                }
+            }
+        }
     }
 }
 
