@@ -1,5 +1,6 @@
 use regex::Regex;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::io::Read;
 
@@ -47,7 +48,7 @@ fn can_afford(a: &ResourceVector, b: &ResourceVector) -> i64 {
         .unwrap()
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct State {
     robots: [i64; NUM_RESOURCES],
     resources: ResourceVector,
@@ -73,6 +74,33 @@ impl State {
         self.resources[GEODES]
     }
 
+    fn get_provably_achievable_geodes(&self, blueprint: &Blueprint) -> i64 {
+        self.compute_final_geodes_shortcut(blueprint)
+            .unwrap_or_else(|| self.geodes())
+    }
+
+    fn compute_final_geodes_shortcut(&self, blueprint: &Blueprint) -> Option<i64> {
+        let minutes_left = self.minutes_left();
+        let geodes = self.geodes();
+
+        if minutes_left == 2 {
+            let number_of_affordable_geode_robots = can_afford(&self.resources, &blueprint[3]);
+            let geodes = geodes + 2 * self.robots[GEODES] + number_of_affordable_geode_robots;
+            return Some(geodes);
+        }
+
+        if minutes_left == 1 {
+            let geodes = geodes + self.robots[GEODES];
+            return Some(geodes);
+        }
+
+        if minutes_left == 0 {
+            return Some(geodes);
+        }
+
+        None
+    }
+
     fn next_dream_state(&self, blueprint: &Blueprint) -> State {
         let i = can_afford(&self.resources, &blueprint[0]).min(1);
         let j = can_afford(&self.resources, &blueprint[1]).min(1);
@@ -88,6 +116,10 @@ impl State {
         }
     }
 
+    fn geodes_at_end_if_inactive(&self) -> i64 {
+        self.resources_at_end_if_inactive()[GEODES]
+    }
+
     fn resources_at_end_if_inactive(&self) -> ResourceVector {
         let mut rv = self.resources;
         let mut n = self.minutes_passed;
@@ -98,30 +130,6 @@ impl State {
             n += 1;
         }
         rv
-    }
-
-    fn next_greedy_state(&self, blueprint: &Blueprint) -> State {
-        let mut best: Option<([i64; 4], State)> = None;
-        self.next_states(blueprint).iter().for_each(|st| {
-            let at_end = st.resources_at_end_if_inactive();
-            let score = resources_as_score(&at_end);
-            if let Some((best_score, _)) = best {
-                if score > best_score {
-                    best = Some((score, st.clone()));
-                }
-            } else {
-                best = Some((score, st.clone()));
-            }
-        });
-        best.unwrap().1
-    }
-
-    fn greedy_score(&self, blueprint: &Blueprint) -> [i64; 4] {
-        let mut current = self.clone();
-        while current.minutes_passed < self.minutes_target {
-            current = current.next_greedy_state(blueprint);
-        }
-        resources_as_score(&current.resources)
     }
 
     fn upper_bound_geodes(&self, blueprint: &Blueprint) -> i64 {
@@ -176,6 +184,7 @@ struct Memo {
     hits: i64,
     misses: i64,
     max_geodes_ever_seen: i64,
+    q: VecDeque<State>,
 }
 
 impl Memo {
@@ -186,65 +195,31 @@ impl Memo {
             hits: 0,
             misses: 0,
             max_geodes_ever_seen: 0,
+            q: VecDeque::new(),
         }
     }
 
     fn evaluate(&mut self, blueprint: &Blueprint, state: &State) -> i64 {
         self.iter += 1;
 
-        let geodes = state.resources[GEODES];
+        if let Some(geodes) = state.compute_final_geodes_shortcut(blueprint) {
+            self.max_geodes_ever_seen = self.max_geodes_ever_seen.max(geodes);
+            return geodes;
+        }
+
+        let geodes = state.geodes_at_end_if_inactive();
         self.max_geodes_ever_seen = self.max_geodes_ever_seen.max(geodes);
 
         let upper_bound = state.upper_bound_geodes(blueprint);
-
-        if self.iter % 10_000_000 == 0 {
-            let greedy_score = state.greedy_score(blueprint);
-            eprintln!(
-                "iteration {}: {:?} hits {} misses {} memosz {} geodes {} upper-bound-geodes {} greedy-score {:?} max-geodes {}",
-                self.iter,
-                state,
-                self.hits,
-                self.misses,
-                self.memo.len(),
-                geodes,
-                upper_bound,
-                greedy_score,
-                self.max_geodes_ever_seen,
-            );
-            self.hits = 0;
-            self.misses = 0;
-        }
-
         if upper_bound < self.max_geodes_ever_seen {
             return 0;
         }
 
-        let minutes_left = state.minutes_left();
-
-        if minutes_left == 2 {
-            let number_of_affordable_geode_robots = can_afford(&state.resources, &blueprint[3]);
-            let geodes = geodes + 2 * state.robots[GEODES] + number_of_affordable_geode_robots;
-            self.max_geodes_ever_seen = self.max_geodes_ever_seen.max(geodes);
-            return geodes;
-        }
-
-        if minutes_left == 1 {
-            let geodes = geodes + state.robots[GEODES];
-            self.max_geodes_ever_seen = self.max_geodes_ever_seen.max(geodes);
-            return geodes;
-        }
-
-        if minutes_left == 0 {
-            return geodes;
-        }
-
-        let key = (state.resources, state.robots, minutes_left);
+        let key = (state.resources, state.robots, state.minutes_left());
 
         if let Some(result) = self.memo.get(&key) {
-            self.hits += 1;
             return *result;
         }
-        self.misses += 1;
 
         let result = state
             .next_states(&blueprint)
@@ -252,8 +227,6 @@ impl Memo {
             .map(|x| self.evaluate(blueprint, x))
             .max()
             .unwrap();
-
-        // eprintln!("result at {:?} time_left={} : {}", state, time_left, result);
 
         self.memo.insert(key, result);
 
