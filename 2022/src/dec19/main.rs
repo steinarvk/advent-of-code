@@ -136,30 +136,34 @@ impl State {
         let remaining_resources = self.resources;
         let mut rv = Vec::new();
 
-        for i in 0..=can_afford(&remaining_resources, &blueprint[0]).min(1) {
-            let remaining_resources = submul(&remaining_resources, &blueprint[0], i);
-            for j in 0..=can_afford(&remaining_resources, &blueprint[1]).min(1) {
-                let remaining_resources = submul(&remaining_resources, &blueprint[1], j);
-                for k in 0..=can_afford(&remaining_resources, &blueprint[2]).min(1) {
-                    let remaining_resources = submul(&remaining_resources, &blueprint[2], k);
-                    for l in 0..=can_afford(&remaining_resources, &blueprint[3]).min(1) {
-                        let remaining_resources = submul(&remaining_resources, &blueprint[3], l);
+        for (i, bp) in blueprint.iter().enumerate().rev() {
+            if can_afford(&self.resources, bp) > 0 {
+                let mut new_robots = self.robots;
+                let mut new_resources = self.resources;
 
-                        let new_robots: [i64; NUM_RESOURCES] = [i, j, k, l];
+                new_robots[i] += 1;
+                bp.iter().enumerate().for_each(|(j, cost)| {
+                    new_resources[j] -= cost;
+                });
 
-                        if new_robots.iter().sum::<i64>() > 1 {
-                            continue;
-                        }
-
-                        rv.push(State {
-                            robots: add(&new_robots, &self.robots),
-                            resources: add(&remaining_resources, &self.robots),
-                            minutes_passed: self.minutes_passed + 1,
-                            minutes_target: self.minutes_target,
-                        });
-                    }
-                }
+                rv.push(State {
+                    robots: new_robots,
+                    resources: add(&new_resources, &self.robots),
+                    minutes_passed: self.minutes_passed + 1,
+                    minutes_target: self.minutes_target,
+                });
             }
+        }
+
+        let relevant_robots = if self.robots[OBSIDIAN] == 0 { 3 } else { 4 };
+
+        if rv.len() < relevant_robots {
+            rv.push(State {
+                robots: self.robots,
+                resources: add(&remaining_resources, &self.robots),
+                minutes_passed: self.minutes_passed + 1,
+                minutes_target: self.minutes_target,
+            });
         }
 
         rv
