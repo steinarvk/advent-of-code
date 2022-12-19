@@ -59,68 +59,6 @@ impl State {
         let minutes_left = self.minutes_left();
         let geodes = self.geodes();
 
-        if minutes_left == 3 {
-            // Scenarios:
-            // - Early geode bot + Late geode bot
-            // - Early non-geode bot --> able to afford late geode bot
-            // - Early geode bot only
-            // - Late geode bot only
-            // - No new geode bots.
-            // Outcomes are essentially {0,1} x {0,1}.
-
-            let mut early_bots = 0;
-            let mut late_bots = 0;
-
-            let can_afford_early_geode_bot = can_afford(&self.resources, &blueprint[GEODES]);
-
-            let (early_bots, late_bots) = if can_afford_early_geode_bot {
-                let mut resources = self.resources;
-
-                for i in 0..4 {
-                    resources[i] -= blueprint[GEODES][i];
-                }
-
-                let can_afford_late_geode_bot = can_afford(&resources, &blueprint[GEODES]);
-
-                if can_afford_late_geode_bot {
-                    (1, 1)
-                } else {
-                    (1, 0)
-                }
-            } else {
-                let mut can_afford_late_bot = false;
-
-                for bot in 0..3 {
-                    if can_afford(&self.resources, &blueprint[bot]) {
-                        let mut resources = self.resources;
-                        for i in 0..4 {
-                            resources[i] += self.robots[i] - blueprint[bot][i];
-                            if i == bot {
-                                resources[i] += 1;
-                            }
-                        }
-                        if can_afford(&resources, &blueprint[GEODES]) {
-                            can_afford_late_bot = true;
-                            break;
-                        }
-                    }
-                }
-
-                if !can_afford_late_bot {
-                    let mut resources = self.resources;
-                    for i in 0..4 {
-                        resources[i] += self.robots[i];
-                    }
-                    can_afford_late_bot = can_afford(&resources, &blueprint[GEODES]);
-                }
-
-                (0, if can_afford_late_bot { 1 } else { 0 })
-            };
-
-            let geodes = geodes + 3 * self.robots[GEODES] + 2 * early_bots + late_bots;
-            return Some(geodes);
-        }
-
         if minutes_left == 2 {
             let extra_bots = if can_afford(&self.resources, &blueprint[3]) {
                 1
