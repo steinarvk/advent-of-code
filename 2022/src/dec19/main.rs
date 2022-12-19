@@ -268,7 +268,7 @@ fn main() -> Result<()> {
     for (i, blueprint) in blueprints.iter().enumerate() {
         let mut memo = Memo::new();
         let id = (i + 1) as i64;
-        let geodes_24 = memo.evaluate(&blueprint, 24);
+        let geodes_24 = memo.evaluate(blueprint, 24);
         let quality = id * geodes_24;
         sum_of_qualities += quality;
 
@@ -278,7 +278,7 @@ fn main() -> Result<()> {
         );
 
         if i < 3 {
-            let geodes_32 = memo.evaluate(&blueprint, 32);
+            let geodes_32 = memo.evaluate(blueprint, 32);
             println!(
                 "Blueprint {} (after {} iterations): {} after 32",
                 id, memo.iter, geodes_32,
