@@ -1,33 +1,16 @@
 use regex::Regex;
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::io::Read;
 
 type Result<T> = std::result::Result<T, anyhow::Error>;
 
 const NUM_RESOURCES: usize = 4; // Ore Clay Obsidian Geode
-const ORE: usize = 0;
-const CLAY: usize = 1;
 const OBSIDIAN: usize = 2;
 const GEODES: usize = 3;
 
 type ResourceVector = [i64; NUM_RESOURCES];
 type RobotVector = [i64; NUM_RESOURCES];
-type StateVector = [i64; NUM_RESOURCES * 2];
 type Blueprint = [ResourceVector; NUM_RESOURCES];
-
-fn resources_as_score(res: &ResourceVector) -> [i64; 4] {
-    [res[GEODES], res[OBSIDIAN], res[CLAY], res[ORE]]
-}
-
-fn submul(a: &ResourceVector, b: &ResourceVector, n: i64) -> ResourceVector {
-    let mut rv: ResourceVector = *a;
-    for i in 0..NUM_RESOURCES {
-        rv[i] -= n * b[i];
-    }
-    rv
-}
 
 fn add(a: &ResourceVector, b: &ResourceVector) -> ResourceVector {
     let mut rv: ResourceVector = *a;
@@ -37,18 +20,16 @@ fn add(a: &ResourceVector, b: &ResourceVector) -> ResourceVector {
     rv
 }
 
-fn can_afford(a: &ResourceVector, b: &ResourceVector) -> i64 {
-    a.iter()
-        .zip(b.iter())
-        .filter_map(|(x, y)| match y {
-            0 => None,
-            y => Some(x / y),
-        })
-        .min()
-        .unwrap()
+fn can_afford(resources: &ResourceVector, cost: &ResourceVector) -> bool {
+    for i in 0..NUM_RESOURCES {
+        if resources[i] < cost[i] {
+            return false;
+        }
+    }
+    true
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 struct State {
     robots: [i64; NUM_RESOURCES],
     resources: ResourceVector,
@@ -74,18 +55,79 @@ impl State {
         self.resources[GEODES]
     }
 
-    fn get_provably_achievable_geodes(&self, blueprint: &Blueprint) -> i64 {
-        self.compute_final_geodes_shortcut(blueprint)
-            .unwrap_or_else(|| self.geodes())
-    }
-
     fn compute_final_geodes_shortcut(&self, blueprint: &Blueprint) -> Option<i64> {
         let minutes_left = self.minutes_left();
         let geodes = self.geodes();
 
+        if minutes_left == 3 {
+            // Scenarios:
+            // - Early geode bot + Late geode bot
+            // - Early non-geode bot --> able to afford late geode bot
+            // - Early geode bot only
+            // - Late geode bot only
+            // - No new geode bots.
+            // Outcomes are essentially {0,1} x {0,1}.
+
+            let mut early_bots = 0;
+            let mut late_bots = 0;
+
+            let can_afford_early_geode_bot = can_afford(&self.resources, &blueprint[GEODES]);
+
+            let (early_bots, late_bots) = if can_afford_early_geode_bot {
+                let mut resources = self.resources;
+
+                for i in 0..4 {
+                    resources[i] -= blueprint[GEODES][i];
+                }
+
+                let can_afford_late_geode_bot = can_afford(&resources, &blueprint[GEODES]);
+
+                if can_afford_late_geode_bot {
+                    (1, 1)
+                } else {
+                    (1, 0)
+                }
+            } else {
+                let mut can_afford_late_bot = false;
+
+                for bot in 0..3 {
+                    if can_afford(&self.resources, &blueprint[bot]) {
+                        let mut resources = self.resources;
+                        for i in 0..4 {
+                            resources[i] += self.robots[i] - blueprint[bot][i];
+                            if i == bot {
+                                resources[i] += 1;
+                            }
+                        }
+                        if can_afford(&resources, &blueprint[GEODES]) {
+                            can_afford_late_bot = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !can_afford_late_bot {
+                    let mut resources = self.resources;
+                    for i in 0..4 {
+                        resources[i] += self.robots[i];
+                    }
+                    can_afford_late_bot = can_afford(&resources, &blueprint[GEODES]);
+                }
+
+                (0, if can_afford_late_bot { 1 } else { 0 })
+            };
+
+            let geodes = geodes + 3 * self.robots[GEODES] + 2 * early_bots + late_bots;
+            return Some(geodes);
+        }
+
         if minutes_left == 2 {
-            let number_of_affordable_geode_robots = can_afford(&self.resources, &blueprint[3]);
-            let geodes = geodes + 2 * self.robots[GEODES] + number_of_affordable_geode_robots;
+            let extra_bots = if can_afford(&self.resources, &blueprint[3]) {
+                1
+            } else {
+                0
+            };
+            let geodes = geodes + 2 * self.robots[GEODES] + extra_bots;
             return Some(geodes);
         }
 
@@ -102,10 +144,26 @@ impl State {
     }
 
     fn next_dream_state(&self, blueprint: &Blueprint) -> State {
-        let i = can_afford(&self.resources, &blueprint[0]).min(1);
-        let j = can_afford(&self.resources, &blueprint[1]).min(1);
-        let k = can_afford(&self.resources, &blueprint[2]).min(1);
-        let l = can_afford(&self.resources, &blueprint[3]).min(1);
+        let i = if can_afford(&self.resources, &blueprint[0]) {
+            1
+        } else {
+            0
+        };
+        let j = if can_afford(&self.resources, &blueprint[1]) {
+            1
+        } else {
+            0
+        };
+        let k = if can_afford(&self.resources, &blueprint[2]) {
+            1
+        } else {
+            0
+        };
+        let l = if can_afford(&self.resources, &blueprint[3]) {
+            1
+        } else {
+            0
+        };
 
         let new_robots: [i64; NUM_RESOURCES] = [i, j, k, l];
         State {
@@ -116,22 +174,6 @@ impl State {
         }
     }
 
-    fn geodes_at_end_if_inactive(&self) -> i64 {
-        self.resources_at_end_if_inactive()[GEODES]
-    }
-
-    fn resources_at_end_if_inactive(&self) -> ResourceVector {
-        let mut rv = self.resources;
-        let mut n = self.minutes_passed;
-        while n < self.minutes_target {
-            for i in 0..NUM_RESOURCES {
-                rv[i] += self.robots[i];
-            }
-            n += 1;
-        }
-        rv
-    }
-
     fn upper_bound_geodes(&self, blueprint: &Blueprint) -> i64 {
         let mut current = self.clone();
         while current.minutes_passed < self.minutes_target {
@@ -140,12 +182,15 @@ impl State {
         current.geodes()
     }
 
-    fn next_states(&self, blueprint: &Blueprint) -> Vec<State> {
+    fn foreach_next_state<F>(&self, blueprint: &Blueprint, mut callback: F)
+    where
+        F: FnMut(&State),
+    {
         let remaining_resources = self.resources;
-        let mut rv = Vec::new();
+        let mut count = 0;
 
         for (i, bp) in blueprint.iter().enumerate().rev() {
-            if can_afford(&self.resources, bp) > 0 {
+            if can_afford(&self.resources, bp) {
                 let mut new_robots = self.robots;
                 let mut new_resources = self.resources;
 
@@ -154,7 +199,8 @@ impl State {
                     new_resources[j] -= cost;
                 });
 
-                rv.push(State {
+                count += 1;
+                callback(&State {
                     robots: new_robots,
                     resources: add(&new_resources, &self.robots),
                     minutes_passed: self.minutes_passed + 1,
@@ -165,26 +211,22 @@ impl State {
 
         let relevant_robots = if self.robots[OBSIDIAN] == 0 { 3 } else { 4 };
 
-        if rv.len() < relevant_robots {
-            rv.push(State {
+        if count < relevant_robots {
+            callback(&State {
                 robots: self.robots,
                 resources: add(&remaining_resources, &self.robots),
                 minutes_passed: self.minutes_passed + 1,
                 minutes_target: self.minutes_target,
             });
         }
-
-        rv
     }
 }
 
 struct Memo {
     memo: HashMap<(ResourceVector, RobotVector, i32), i64>,
     iter: i64,
-    hits: i64,
-    misses: i64,
     max_geodes_ever_seen: i64,
-    q: VecDeque<State>,
+    evaluated_for_time: i32,
 }
 
 impl Memo {
@@ -192,49 +234,51 @@ impl Memo {
         Memo {
             memo: HashMap::new(),
             iter: 0,
-            hits: 0,
-            misses: 0,
             max_geodes_ever_seen: 0,
-            q: VecDeque::new(),
+            evaluated_for_time: 0,
         }
     }
 
-    fn evaluate(&mut self, blueprint: &Blueprint, state: &State) -> i64 {
+    fn evaluate_from(&mut self, blueprint: &Blueprint, state: &State) -> Option<i64> {
         self.iter += 1;
 
         if let Some(geodes) = state.compute_final_geodes_shortcut(blueprint) {
             self.max_geodes_ever_seen = self.max_geodes_ever_seen.max(geodes);
-            return geodes;
+            return Some(geodes);
         }
 
-        let geodes = state.geodes_at_end_if_inactive();
+        let geodes = state.geodes();
         self.max_geodes_ever_seen = self.max_geodes_ever_seen.max(geodes);
 
         let upper_bound = state.upper_bound_geodes(blueprint);
         if upper_bound < self.max_geodes_ever_seen {
-            return 0;
+            return None;
         }
 
         let key = (state.resources, state.robots, state.minutes_left());
 
         if let Some(result) = self.memo.get(&key) {
-            return *result;
+            return Some(*result);
         }
 
-        let result = state
-            .next_states(&blueprint)
-            .iter()
-            .map(|x| self.evaluate(blueprint, x))
-            .max()
-            .unwrap();
+        let mut running_max = 0;
+        state.foreach_next_state(blueprint, |state| {
+            if let Some(value) = self.evaluate_from(blueprint, state) {
+                running_max = running_max.max(value);
+            }
+        });
 
-        self.memo.insert(key, result);
+        self.memo.insert(key, running_max);
 
-        result
+        Some(running_max)
     }
 
-    fn evaluate_blueprint(&mut self, blueprint: &Blueprint, target: i32) -> i64 {
-        self.evaluate(blueprint, &State::initial_state(target))
+    fn evaluate(&mut self, blueprint: &Blueprint, target: i32) -> i64 {
+        assert!(target >= self.evaluated_for_time); // Must evaluate in order of increasing scope
+        self.evaluated_for_time = target;
+
+        self.evaluate_from(blueprint, &State::initial_state(target))
+            .unwrap()
     }
 }
 
@@ -275,10 +319,6 @@ fn main() -> Result<()> {
 
     let blueprints: Vec<Blueprint> = parse_scenario(s)?;
 
-    for b in blueprints.iter() {
-        println!("{:?}", b);
-    }
-
     let mut sum_of_qualities = 0;
     let mut product_of_geodes = 1;
     let mut total_iterations = 0;
@@ -286,24 +326,20 @@ fn main() -> Result<()> {
     for (i, blueprint) in blueprints.iter().enumerate() {
         let mut memo = Memo::new();
         let id = (i + 1) as i64;
-        let geodes_24 = memo.evaluate_blueprint(&blueprint, 24);
+        let geodes_24 = memo.evaluate(&blueprint, 24);
         let quality = id * geodes_24;
         sum_of_qualities += quality;
 
         println!(
             "Blueprint {} (after {} iterations): {} after 24",
-            i + 1,
-            memo.iter,
-            geodes_24,
+            id, memo.iter, geodes_24,
         );
 
         if i < 3 {
-            let geodes_32 = memo.evaluate_blueprint(&blueprint, 32);
+            let geodes_32 = memo.evaluate(&blueprint, 32);
             println!(
                 "Blueprint {} (after {} iterations): {} after 32",
-                i + 1,
-                memo.iter,
-                geodes_32,
+                id, memo.iter, geodes_32,
             );
             product_of_geodes *= geodes_32;
         }
@@ -313,7 +349,9 @@ fn main() -> Result<()> {
 
     println!("Total iterations used: {}", total_iterations);
 
+    println!();
     println!("Answer to part A: {}", sum_of_qualities);
     println!("Answer to part B: {}", product_of_geodes);
+
     Ok(())
 }
