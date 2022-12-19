@@ -4,7 +4,7 @@ use std::io::Read;
 
 type Result<T> = std::result::Result<T, anyhow::Error>;
 
-const NUM_RESOURCES: usize = 4; // Ore Clay Obsidian Geode
+const NUM_RESOURCES: usize = 4;
 const OBSIDIAN: usize = 2;
 const GEODES: usize = 3;
 
@@ -104,6 +104,7 @@ impl State {
         };
 
         let new_robots: [i64; NUM_RESOURCES] = [i, j, k, l];
+
         State {
             robots: add(&new_robots, &self.robots),
             resources: add(&self.resources, &self.robots),
@@ -115,9 +116,12 @@ impl State {
     fn upper_bound_geodes(&self, blueprint: &Blueprint) -> i64 {
         let mut current = self.clone();
         while current.minutes_passed < self.minutes_target {
+            if let Some(geodes) = current.compute_final_geodes_shortcut(blueprint) {
+                return geodes;
+            }
             current = current.next_dream_state(blueprint);
         }
-        current.geodes()
+        current.compute_final_geodes_shortcut(blueprint).unwrap()
     }
 
     fn foreach_next_state<F>(&self, blueprint: &Blueprint, mut callback: F)
