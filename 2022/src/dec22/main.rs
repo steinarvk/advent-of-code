@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Read;
 
 type Result<T> = std::result::Result<T, anyhow::Error>;
@@ -63,6 +64,16 @@ impl Direction {
         ]
     }
 
+    fn from_delta(dx: i32, dy: i32) -> Result<Direction> {
+        Ok(match (dx, dy) {
+            (1, 0) => Direction::Right,
+            (-1, 0) => Direction::Left,
+            (0, 1) => Direction::Down,
+            (0, -1) => Direction::Up,
+            _ => anyhow::bail!("invalid direction ({}, {})", dx, dy),
+        })
+    }
+
     fn from_i32(n: i32) -> Direction {
         let n = (n % 4 + 4) % 4;
         match n {
@@ -108,6 +119,10 @@ impl Direction {
 
     fn step(&self, origin: (i32, i32)) -> (i32, i32) {
         (origin.0 + self.dx(), origin.1 + self.dy())
+    }
+
+    fn step_back(&self, origin: (i32, i32)) -> (i32, i32) {
+        (origin.0 - self.dx(), origin.1 - self.dy())
     }
 }
 
@@ -578,6 +593,412 @@ struct CubeWrapper {
     edges_identified: HashMap<EdgeIndex, EdgeIndex>,
 }
 
+fn adjacent_including_diagonally(a: (i32, i32), b: (i32, i32)) -> bool {
+    let (i, j) = a;
+    let (x, y) = b;
+    (i - x).abs().max((j - y).abs()) == 1
+}
+
+fn wrap_cube(unwrapped_map: &Map<bool>) -> Result<HashSet<(EdgeIndex, EdgeIndex)>> {
+    eprintln!(
+        "unfolding cube:\n{}",
+        unwrapped_map.show(|x| if *x { '#'.to_string() } else { '.'.to_string() })
+    );
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    enum Label {
+        Red,
+        Green,
+        Blue,
+    }
+
+    let mut face_labels: Map<Option<Label>> = Map::new(6, 6, &None);
+
+    let mut rv: HashSet<(EdgeIndex, EdgeIndex)> = HashSet::new();
+    let mut known_edges: HashSet<EdgeIndex> = HashSet::new();
+    let mut wants_label: HashSet<FaceIndex> = HashSet::new();
+    let mut outside_labels: HashMap<FaceIndex, Label> = HashMap::new();
+    let mut start: Option<Vec<FaceIndex>> = None;
+
+    for i in 0..unwrapped_map.number_of_columns {
+        for j in 0..unwrapped_map.number_of_rows {
+            let p_embed = (i + 1, j + 1);
+            let p_unembed = (i, j);
+            if !unwrapped_map.at(p_unembed).unwrap() {
+                continue;
+            }
+
+            // There is a face here in the planarized cube.
+
+            for dx in -1_i32..=1_i32 {
+                for dy in -1_i32..=1_i32 {
+                    if dx.abs() == 0 && dy.abs() == 0 {
+                        continue;
+                    }
+
+                    let nb_embed = (p_embed.0 + dx, p_embed.1 + dy);
+                    let nb_unembed = (nb_embed.0 - 1, nb_embed.1 - 1);
+
+                    let diagonal = dx.abs() == 1 && dy.abs() == 1;
+
+                    if unwrapped_map.at(nb_unembed) != Some(&true) {
+                        continue;
+                    }
+
+                    // These are two adjacent faces (orthogonally or diagonally).
+
+                    if !diagonal {
+                        // Orthogonal neighbours.
+                        let direction_out = Direction::from_delta(dx, dy)?;
+                        let direction_in = direction_out.opposite();
+
+                        rv.insert(((p_unembed, direction_out), (nb_unembed, direction_in)));
+                        rv.insert(((nb_unembed, direction_in), (p_unembed, direction_out)));
+                        known_edges.insert((p_unembed, direction_out));
+                        known_edges.insert((nb_unembed, direction_in));
+
+                        // We want two orthogonal neighbours as a starting point for the search
+                        // below.
+                        if start.is_none() {
+                            *face_labels.at_mut(p_embed).unwrap() = Some(Label::Red);
+                            *face_labels.at_mut(nb_embed).unwrap() = Some(Label::Green);
+                            start = Some(vec![p_embed, nb_embed]);
+                            eprintln!("exploration will go: {:?}", start);
+                        }
+                    } else {
+                        // Diagonal neighbours.
+                        // For a coherent cube, exactly one of the orthogonal counterparts must be
+                        // present.
+                        //
+                        // P  A
+                        // B  Nb
+                        let a_unembed = (p_unembed.0 + dx, p_unembed.1);
+                        let b_unembed = (p_unembed.0, p_unembed.1 + dy);
+
+                        eprintln!(
+                            "{:?} [{} {}] {:?} {:?}",
+                            p_unembed, dx, dy, a_unembed, b_unembed
+                        );
+
+                        let a_present = unwrapped_map.at(a_unembed) == Some(&true);
+                        let b_present = unwrapped_map.at(b_unembed) == Some(&true);
+
+                        if a_present && b_present {
+                            anyhow::bail!("invalid cube: full 2x2 square in planarization");
+                        }
+                        if !a_present && !b_present {
+                            anyhow::bail!("invalid cube: dangling diagonal in planarization");
+                        }
+
+                        let (direction_out, direction_in) = if a_present {
+                            (
+                                Direction::from_delta(0, dy)?,
+                                Direction::from_delta(-dx, 0)?,
+                            )
+                        } else {
+                            (
+                                Direction::from_delta(dx, 0)?,
+                                Direction::from_delta(0, -dy)?,
+                            )
+                        };
+
+                        // . #
+                        // # #
+                        //
+                        // 1 -1 should be Up, Left
+                        // A present
+                        // B not present
+
+                        eprintln!("linking diagonal edge: {:?} {:?}", p_unembed, direction_out);
+                        eprintln!("linking diagonal edge: {:?} {:?}", nb_unembed, direction_in);
+                        rv.insert(((p_unembed, direction_out), (nb_unembed, direction_in)));
+                        rv.insert(((nb_unembed, direction_in), (p_unembed, direction_out)));
+                        known_edges.insert((p_unembed, direction_out));
+                        known_edges.insert((nb_unembed, direction_in));
+                    }
+                }
+            }
+        }
+    }
+
+    for i in 0..unwrapped_map.number_of_columns {
+        for j in 0..unwrapped_map.number_of_rows {
+            let p_unembed = (i, j);
+            let p_embed = (i + 1, j + 1);
+
+            if !unwrapped_map.at(p_unembed).unwrap() {
+                continue;
+            }
+
+            for d in Direction::all() {
+                if known_edges.contains(&(p_unembed, d)) {
+                    continue;
+                }
+
+                wants_label.insert(d.step(p_embed));
+            }
+        }
+    }
+
+    let mut q = match start {
+        None => anyhow::bail!("not a valid cube: unable to find two orthogonally adjacent faces"),
+        Some(q) => q,
+    };
+
+    let mut counters = [0; 3];
+
+    while let Some(p_embed) = q.pop() {
+        let viz: Map<char> = face_labels.indexed_map(|(i, j), v| {
+            let present = unwrapped_map.at((i - 1, j - 1)) == Some(&true);
+            if (i, j) == p_embed {
+                return '?';
+            }
+            if let Some(x) = outside_labels.get(&(i - 1, j - 1)) {
+                return match x {
+                    Label::Red => 'r',
+                    Label::Green => 'g',
+                    Label::Blue => 'b',
+                };
+            }
+            match (present, v) {
+                (true, Some(Label::Red)) => 'R',
+                (true, Some(Label::Green)) => 'G',
+                (true, Some(Label::Blue)) => 'B',
+                (false, Some(Label::Red)) => 'r',
+                (false, Some(Label::Green)) => 'g',
+                (false, Some(Label::Blue)) => 'b',
+                (true, None) => '.',
+                _ => ' ',
+            }
+        });
+
+        eprintln!("partly labeled cube:\n{}", viz.show(|x| format!("{}", x)));
+        eprintln!("now considering {:?}", p_embed);
+
+        let (i, j) = p_embed;
+        let p_unembed = (i - 1, j - 1);
+        let current_label = face_labels.at(p_embed).unwrap();
+        let mut neighbour_labels: HashSet<Label> = HashSet::new();
+        let mut assign: HashSet<Label> = HashSet::new();
+
+        if let Some(label) = current_label {
+            eprintln!("already labeled {:?}", label);
+            assign.insert(*label);
+        }
+
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+
+                let nb_embed = (i + dx, j + dy);
+
+                if let Some(Some(neighbour_label)) = face_labels.at(nb_embed) {
+                    eprintln!("neighbour label {:?}: {:?}", nb_embed, *neighbour_label);
+                    neighbour_labels.insert(*neighbour_label);
+                }
+            }
+        }
+
+        let possible_labels: Vec<&Label> = [Label::Red, Label::Green, Label::Blue]
+            .iter()
+            .filter(|x| !neighbour_labels.contains(x))
+            .collect();
+        if possible_labels.len() == 0 {
+            anyhow::bail!(
+                "not a valid cube: cell {:?} has 3-colour neighbours",
+                p_unembed
+            );
+        }
+
+        if possible_labels.len() == 1 {
+            let label = **possible_labels.first().unwrap();
+            eprintln!("labeling due to single possible: {:?} {:?}", p_embed, label);
+            assign.insert(label);
+        }
+
+        for d in Direction::all() {
+            let two_steps_away = d.step(d.step(p_embed));
+            if let Some(Some(opposite_label)) = face_labels.at(two_steps_away) {
+                eprintln!(
+                    "labeling due to opposite {:?}: {:?} {:?}",
+                    two_steps_away, p_embed, *opposite_label
+                );
+                assign.insert(*opposite_label);
+            }
+        }
+
+        if assign.len() != 1 {
+            anyhow::bail!(
+                "cube-unwrapping algorithm failed: {} possible assignments for {:?}",
+                assign.len(),
+                p_unembed
+            );
+        }
+
+        let label = *assign.iter().next().unwrap();
+        if unwrapped_map.at(p_unembed) == Some(&true) {
+            *face_labels.at_mut(p_embed).unwrap() = Some(label);
+
+            if let Some(true) = unwrapped_map.at(p_unembed) {
+                let index = match label {
+                    Label::Red => 0,
+                    Label::Green => 1,
+                    Label::Blue => 2,
+                };
+                counters[index] += 1;
+            }
+
+            for d in Direction::all() {
+                let nb = d.step(p_embed);
+                let nb_unembed = (nb.0 - 1, nb.1 - 1);
+
+                if unwrapped_map.at(nb_unembed) != Some(&true) {
+                    if !wants_label.contains(&nb) {
+                        continue;
+                    }
+                }
+
+                if face_labels.at(nb).unwrap().is_none() {
+                    q.push(nb);
+                }
+            }
+        } else {
+            // Not a present face in the planarization, so it doesn't obey normal rules.
+            // But needed for last stage.
+            outside_labels.insert(p_unembed, label);
+        }
+    }
+
+    let viz: Map<char> = face_labels.indexed_map(|(i, j), v| {
+        let present = unwrapped_map.at((i - 1, j - 1)) == Some(&true);
+        if let Some(x) = outside_labels.get(&(i - 1, j - 1)) {
+            return match x {
+                Label::Red => 'r',
+                Label::Green => 'g',
+                Label::Blue => 'b',
+            };
+        }
+        match (present, v) {
+            (true, Some(Label::Red)) => 'R',
+            (true, Some(Label::Green)) => 'G',
+            (true, Some(Label::Blue)) => 'B',
+            (false, Some(Label::Red)) => 'r',
+            (false, Some(Label::Green)) => 'g',
+            (false, Some(Label::Blue)) => 'b',
+            (true, None) => '.',
+            _ => ' ',
+        }
+    });
+
+    eprintln!("labeled cube:\n{}", viz.show(|x| format!("{}", x)));
+
+    if counters != [2; 3] {
+        anyhow::bail!("not a valid cube: counters {:?} at end", counters);
+    }
+
+    let mut matches: HashMap<(Label, Label), Vec<EdgeIndex>> = HashMap::new();
+
+    eprintln!("known edges so far: {}", known_edges.len());
+
+    for pass in 0..=1 {
+        for i in 0..unwrapped_map.number_of_columns {
+            for j in 0..unwrapped_map.number_of_rows {
+                let p_unembed = (i, j);
+                let p_embed = (i + 1, j + 1);
+
+                let label = *face_labels.at(p_embed).unwrap();
+
+                if !unwrapped_map.at(p_unembed).unwrap() {
+                    continue;
+                }
+
+                for d in Direction::all() {
+                    let self_edge_index = (p_unembed, d);
+
+                    if known_edges.contains(&self_edge_index) {
+                        continue;
+                    }
+
+                    let nb_unembed = d.step(p_unembed);
+
+                    let maybe_mate_label = outside_labels.get(&nb_unembed);
+                    if maybe_mate_label.is_none() {
+                        anyhow::bail!("no known label for {:?}", nb_unembed);
+                    }
+
+                    let me = label.unwrap();
+                    let mate = *maybe_mate_label.unwrap();
+
+                    eprintln!(
+                    "Trying to find where to connect {:?}. Coming from a {:?} face, want a {:?}",
+                    self_edge_index, me, mate
+                );
+
+                    let key = (me, mate);
+
+                    if pass == 0 {
+                        let key = (mate, me);
+                        matches
+                            .entry(key)
+                            .and_modify(|x| x.push(self_edge_index))
+                            .or_insert_with(|| vec![self_edge_index]);
+                        eprintln!("waiting for match for {:?} {:?}", key, self_edge_index);
+                        continue;
+                    }
+
+                    match matches.get(&key) {
+                        Some(other_potential_edge_indexes) => {
+                            let eligible: Vec<&EdgeIndex> = other_potential_edge_indexes
+                                .iter()
+                                .filter(|((x, y), _)| {
+                                    // Must be distant. If faces are adjacent, they're already
+                                    // connected by different edges.
+                                    (i - x).abs().max((j - y).abs()) > 1
+                                })
+                                .collect();
+                            if eligible.len() != 1 {
+                                anyhow::bail!(
+                                    "unable to figure out match for {:?}: {} eligible",
+                                    self_edge_index,
+                                    eligible.len()
+                                );
+                            }
+                            let other_edge_index = *eligible.first().unwrap();
+
+                            rv.insert((self_edge_index, *other_edge_index));
+                            rv.insert((*other_edge_index, self_edge_index));
+                            known_edges.insert(self_edge_index);
+                            known_edges.insert(*other_edge_index);
+                            eprintln!(
+                                "found match for {:?} {:?} to {:?}",
+                                key, self_edge_index, other_edge_index
+                            );
+                        }
+                        None => {
+                            anyhow::bail!(
+                                "unable to figure out match for {:?}: no options",
+                                self_edge_index
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("known edges in the end: {}", known_edges.len());
+    if known_edges.len() != (6 * 4) {
+        anyhow::bail!(
+            "bad number of known edges in the end: {}",
+            known_edges.len()
+        );
+    }
+
+    Ok(rv)
+}
+
 impl CubeWrapper {
     fn identify_edges(&mut self, a: EdgeIndex, b: EdgeIndex) {
         self.edges_identified.insert(a, b);
@@ -601,6 +1022,9 @@ impl CubeWrapper {
             face_size,
             edges_identified: HashMap::new(),
         };
+
+        let present_map = faces.map(|x| x.is_some());
+        let edges = wrap_cube(&present_map)?;
 
         faces.indexed_for_each(|p, v| {
             if v.is_some() {
