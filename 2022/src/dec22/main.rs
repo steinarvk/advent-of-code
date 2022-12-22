@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::env;
 use std::io::Read;
 
 type Result<T> = std::result::Result<T, anyhow::Error>;
@@ -64,16 +65,6 @@ impl Direction {
         ]
     }
 
-    fn from_delta(dx: i32, dy: i32) -> Result<Direction> {
-        Ok(match (dx, dy) {
-            (1, 0) => Direction::Right,
-            (-1, 0) => Direction::Left,
-            (0, 1) => Direction::Down,
-            (0, -1) => Direction::Up,
-            _ => anyhow::bail!("invalid direction ({}, {})", dx, dy),
-        })
-    }
-
     fn from_i32(n: i32) -> Direction {
         let n = (n % 4 + 4) % 4;
         match n {
@@ -84,6 +75,16 @@ impl Direction {
             _ => panic!("invalid result of mod 4"),
         }
     }
+
+    fn as_char(&self) -> char {
+        match self {
+            Direction::Right => '>',
+            Direction::Down => 'v',
+            Direction::Left => '<',
+            Direction::Up => '^',
+        }
+    }
+
     fn to_i32(&self) -> i32 {
         match self {
             Direction::Right => 0,
@@ -119,10 +120,6 @@ impl Direction {
 
     fn step(&self, origin: (i32, i32)) -> (i32, i32) {
         (origin.0 + self.dx(), origin.1 + self.dy())
-    }
-
-    fn step_back(&self, origin: (i32, i32)) -> (i32, i32) {
-        (origin.0 - self.dx(), origin.1 - self.dy())
     }
 }
 
@@ -215,17 +212,6 @@ where
         }
     }
 
-    fn indexed_for_each<F>(&self, mut f: F)
-    where
-        F: FnMut((i32, i32), &T),
-    {
-        for (y, row) in self.row_data.iter().enumerate() {
-            for (x, value) in row.iter().enumerate() {
-                f((x.try_into().unwrap(), y.try_into().unwrap()), value);
-            }
-        }
-    }
-
     fn indexed_map<F, B>(&self, f: F) -> Map<B>
     where
         F: Fn((i32, i32), &T) -> B,
@@ -254,24 +240,6 @@ where
         }
     }
 
-    fn in_bounds(&self, (col, row): (i32, i32)) -> bool {
-        !(row < 0 || row >= self.number_of_rows || col < 0 || col >= self.number_of_columns)
-    }
-
-    fn neighbours(&self, (col, row): (i32, i32)) -> Vec<(i32, i32)> {
-        [(0, -1), (0, 1), (-1, 0), (1, 0)]
-            .iter()
-            .filter_map(|(dx, dy)| {
-                let p = (col + dx, row + dy);
-                if self.in_bounds(p) {
-                    Some(p)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
     fn find(&self, needle: T) -> Vec<(i32, i32)>
     where
         T: PartialEq,
@@ -289,14 +257,6 @@ where
         rv
     }
 
-    fn map<F, B>(&self, f: F) -> Map<B>
-    where
-        F: Fn(&T) -> B,
-        B: Clone,
-    {
-        self.indexed_map(|_, x| f(x))
-    }
-
     fn show<F>(&self, format_cell: F) -> String
     where
         F: Fn(&T) -> String,
@@ -311,6 +271,14 @@ where
         }
 
         rv.join("")
+    }
+
+    fn map<F, B>(&self, f: F) -> Map<B>
+    where
+        F: Fn(&T) -> B,
+        B: Clone,
+    {
+        self.indexed_map(|_, x| f(x))
     }
 
     fn values(&self) -> Vec<T> {
@@ -343,7 +311,7 @@ fn pad(s: &str, n: usize) -> String {
     rv
 }
 
-fn parse_scenario(s: &str) -> Result<(FaceMap<TileType>, Vec<Instruction>, State)> {
+fn parse_scenario(s: &str) -> Result<(FaceMap<TileType>, Vec<Instruction>, State, Map<char>)> {
     let parts: Vec<&str> = s.split("\n\n").collect();
 
     if parts.len() != 2 {
@@ -428,7 +396,7 @@ fn parse_scenario(s: &str) -> Result<(FaceMap<TileType>, Vec<Instruction>, State
         }
     }
 
-    Ok((facemap, steps, start_state))
+    Ok((facemap, steps, start_state, full_map))
 }
 
 impl State {
@@ -484,16 +452,21 @@ where
         Ok(())
     }
 
-    fn apply(&mut self, ins: Instruction) -> Result<()> {
+    fn apply(&mut self, ins: Instruction, viz_map: &mut Map<char>) -> Result<()> {
         assert!(*self.current_face_map().at(self.state.subpos).unwrap() == TileType::Floor);
         match ins {
             Instruction::StepForward(n) => {
                 for _ in 0..n {
+                    *viz_map.at_mut((self.full_x(), self.full_y())).unwrap() =
+                        self.state.facing.as_char();
                     self.step_forward()?;
+                    *viz_map.at_mut((self.full_x(), self.full_y())).unwrap() = 'X';
                 }
             }
             Instruction::TurnRight(n) => {
                 self.state.turn_right(n);
+                *viz_map.at_mut((self.full_x(), self.full_y())).unwrap() =
+                    self.state.facing.as_char();
             }
         }
 
@@ -595,10 +568,10 @@ fn populate_map_from(
     facemap: &Map<bool>,
     face: FaceIndex,
     q: QuatPair,
-) -> (
+) -> Result<(
     HashSet<(EdgeIndex, EdgeIndex)>,
     Vec<(EdgeIndex, QuatPair, QuatPair)>,
-) {
+)> {
     let key = q.normalize_as_top_face().hash_key();
 
     *visited.at_mut(face).unwrap() = true;
@@ -623,7 +596,7 @@ fn populate_map_from(
             set.insert((other_edge, edge));
             if !*visited.at(next).unwrap() {
                 let (connections, open_edges) =
-                    populate_map_from(visited, m, facemap, next, next_qp);
+                    populate_map_from(visited, m, facemap, next, next_qp)?;
                 set.extend(connections);
                 rv.extend(open_edges);
             }
@@ -635,7 +608,7 @@ fn populate_map_from(
         }
     }
 
-    (set, rv)
+    Ok((set, rv))
 }
 
 fn wrap_cube(unwrapped_map: &Map<bool>) -> Result<HashSet<(EdgeIndex, EdgeIndex)>> {
@@ -654,15 +627,24 @@ fn wrap_cube(unwrapped_map: &Map<bool>) -> Result<HashSet<(EdgeIndex, EdgeIndex)
         unwrapped_map,
         startpos,
         QuatPair::initial(),
-    );
+    )?;
 
     for (edge, start_q, next_q) in open_edges {
         let who_i_am = start_q.normalize_as_top_face().hash_key();
         let what_i_want = next_q.normalize_as_top_face().hash_key();
         let counterpart_key = (what_i_want, who_i_am);
-        let other_edge = m.get(&counterpart_key).unwrap();
+        let other_edge = match m.get(&counterpart_key) {
+            Some(other_edge) => other_edge,
+            None => {
+                anyhow::bail!("invalid cube: unable to find connection from {:?}", edge);
+            }
+        };
         connections.insert((edge, *other_edge));
         connections.insert((*other_edge, edge));
+    }
+
+    if connections.len() != 24 {
+        anyhow::bail!("failed to fold cube: somehow ended up with weird number of connections ({}), expected 24", connections.len());
     }
 
     Ok(connections)
@@ -698,44 +680,6 @@ impl CubeWrapper {
         for (a, b) in edges {
             rv.identify_edges(a, b);
         }
-
-        /*
-
-        faces.indexed_for_each(|p, v| {
-            if v.is_some() {
-                for d in Direction::all() {
-                    let p1 = d.step(p);
-                    if let Some(Some(_)) = faces.at(p1) {
-                        rv.identify_edges((p, d), (p1, d.opposite()));
-                    }
-                }
-            }
-        });
-
-
-        // Hax
-
-        if face_size == 4 {
-            rv.identify_edges(((3, 2), Direction::Down), ((0, 1), Direction::Left));
-            rv.identify_edges(((2, 0), Direction::Right), ((3, 2), Direction::Right));
-            rv.identify_edges(((2, 0), Direction::Up), ((0, 1), Direction::Up));
-            rv.identify_edges(((2, 2), Direction::Down), ((0, 1), Direction::Down));
-            rv.identify_edges(((2, 1), Direction::Right), ((3, 2), Direction::Up));
-            rv.identify_edges(((2, 0), Direction::Left), ((1, 1), Direction::Up));
-            rv.identify_edges(((1, 1), Direction::Down), ((2, 2), Direction::Left));
-        } else if face_size == 50 {
-            rv.identify_edges(((1, 0), Direction::Up), ((0, 3), Direction::Left));
-            rv.identify_edges(((1, 0), Direction::Left), ((0, 2), Direction::Left));
-            rv.identify_edges(((2, 0), Direction::Up), ((0, 3), Direction::Down));
-            rv.identify_edges(((2, 0), Direction::Right), ((1, 2), Direction::Right));
-            rv.identify_edges(((0, 3), Direction::Down), ((2, 0), Direction::Up));
-
-            rv.identify_edges(((2, 0), Direction::Down), ((1, 1), Direction::Right));
-            rv.identify_edges(((1, 1), Direction::Left), ((0, 2), Direction::Up));
-            rv.identify_edges(((1, 1), Direction::Right), ((2, 0), Direction::Down));
-            rv.identify_edges(((0, 3), Direction::Right), ((1, 2), Direction::Down));
-        }
-        */
 
         Ok(rv)
     }
@@ -966,25 +910,88 @@ impl QuatPair {
     }
 }
 
+fn test_cube_folding() {
+    let mut num_valid = 0;
+    let mut num_invalid = 0;
+    for x in 0_u32..=0xffff_u32 {
+        let m = Map::new(4, 4, &false).indexed_map(|(i, j), _| {
+            assert!(i >= 0 && i < 4);
+            assert!(j >= 0 && j < 4);
+            let n: u32 = (i + j * 4).try_into().unwrap();
+            let bit: u32 = 1 << n;
+            (x & bit) != 0
+        });
+        if m.values().iter().filter(|x| **x).count() != 6 {
+            continue;
+        }
+        if (0..4).all(|x| *m.at((x, 0)).unwrap() == false) {
+            continue;
+        }
+        if (0..4).all(|y| *m.at((0, y)).unwrap() == false) {
+            continue;
+        }
+
+        let connections = wrap_cube(&m);
+        let valid = connections.is_ok();
+
+        if valid {
+            num_valid += 1;
+        } else {
+            num_invalid += 1;
+        }
+
+        let verdict = if valid { "valid" } else { "invalid" };
+
+        if env::var("VALID_CUBES_ONLY").is_ok() && !valid {
+            continue;
+        }
+
+        println!(
+            "{}\n{}",
+            m.show(|x| if *x { '#'.to_string() } else { '.'.to_string() }),
+            verdict,
+        );
+    }
+
+    println!(
+        "Tried folding {} cubes; {} were valid and {} were invalid.",
+        num_valid + num_invalid,
+        num_valid,
+        num_invalid
+    );
+}
+
 fn main() -> Result<()> {
     let mut buffer = String::new();
     std::io::stdin().read_to_string(&mut buffer)?;
 
-    let (faces, steps, start) = parse_scenario(&buffer)?;
+    let (faces, steps, start, full_map) = parse_scenario(&buffer)?;
 
+    let mut viz_map = full_map.clone();
     let mut current = start.associate_faces(&faces, FlatWrapper {});
     for ins in &steps {
-        current.apply(*ins)?;
+        current.apply(*ins, &mut viz_map)?;
+    }
+    if env::var("SHOW_MAPS").is_ok() {
+        println!("{}", viz_map.show(|x| x.to_string()));
     }
     println!("Answer part A: {}", current.value());
 
+    let mut viz_map = full_map.clone();
     let cube_wrapper = CubeWrapper::from(&faces)?;
     let mut current = start.associate_faces(&faces, cube_wrapper);
     for ins in &steps {
-        current.apply(*ins)?;
+        current.apply(*ins, &mut viz_map)?;
     }
 
+    if env::var("SHOW_MAPS").is_ok() {
+        println!("{}", viz_map.show(|x| x.to_string()));
+    }
     println!("Answer part B: {}", current.value());
+
+    if env::var("EXPLORE_CUBE_FOLDING").is_ok() {
+        test_cube_folding();
+    }
 
     Ok(())
 }
