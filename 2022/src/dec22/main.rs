@@ -66,7 +66,7 @@ impl Direction {
     }
 
     fn from_i32(n: i32) -> Direction {
-        let n = (n % 4 + 4) % 4;
+        let n = n.rem_euclid(4);
         match n {
             0 => Direction::Right,
             1 => Direction::Down,
@@ -85,7 +85,7 @@ impl Direction {
         }
     }
 
-    fn to_i32(&self) -> i32 {
+    fn to_i32(self) -> i32 {
         match self {
             Direction::Right => 0,
             Direction::Down => 1,
@@ -311,7 +311,14 @@ fn pad(s: &str, n: usize) -> String {
     rv
 }
 
-fn parse_scenario(s: &str) -> Result<(FaceMap<TileType>, Vec<Instruction>, State, Map<char>)> {
+struct Scenario {
+    face_map: FaceMap<TileType>,
+    instructions: Vec<Instruction>,
+    start_state: State,
+    full_map: Map<char>,
+}
+
+fn parse_scenario(s: &str) -> Result<Scenario> {
     let parts: Vec<&str> = s.split("\n\n").collect();
 
     if parts.len() != 2 {
@@ -380,7 +387,7 @@ fn parse_scenario(s: &str) -> Result<(FaceMap<TileType>, Vec<Instruction>, State
             'L' => Some(Instruction::TurnRight(-1)),
             'R' => Some(Instruction::TurnRight(1)),
             ch => {
-                assert!(ch.is_digit(10));
+                assert!(ch.is_ascii_digit());
                 None
             }
         };
@@ -396,7 +403,12 @@ fn parse_scenario(s: &str) -> Result<(FaceMap<TileType>, Vec<Instruction>, State
         }
     }
 
-    Ok((facemap, steps, start_state, full_map))
+    Ok(Scenario {
+        face_map: facemap,
+        instructions: steps,
+        start_state,
+        full_map,
+    })
 }
 
 impl State {
@@ -562,16 +574,21 @@ struct CubeWrapper {
     edges_identified: HashMap<EdgeIndex, EdgeIndex>,
 }
 
+type IdentifiedEdgesSet = HashSet<(EdgeIndex, EdgeIndex)>;
+
+struct OpenEdge {
+    edge: EdgeIndex,
+    from: QuatPair,
+    to: QuatPair,
+}
+
 fn populate_map_from(
     visited: &mut Map<bool>,
     m: &mut HashMap<([i8; 8], [i8; 8]), EdgeIndex>,
     facemap: &Map<bool>,
     face: FaceIndex,
     q: QuatPair,
-) -> Result<(
-    HashSet<(EdgeIndex, EdgeIndex)>,
-    Vec<(EdgeIndex, QuatPair, QuatPair)>,
-)> {
+) -> Result<(IdentifiedEdgesSet, Vec<OpenEdge>)> {
     let key = q.normalize_as_top_face().hash_key();
 
     *visited.at_mut(face).unwrap() = true;
@@ -604,7 +621,11 @@ fn populate_map_from(
             let who_i_am = key;
             let what_i_want = next_key;
             m.insert((who_i_am, what_i_want), (face, d));
-            rv.push(((face, d), q, next_qp));
+            rv.push(OpenEdge {
+                edge: (face, d),
+                from: q,
+                to: next_qp,
+            });
         }
     }
 
@@ -629,9 +650,9 @@ fn wrap_cube(unwrapped_map: &Map<bool>) -> Result<HashSet<(EdgeIndex, EdgeIndex)
         QuatPair::initial(),
     )?;
 
-    for (edge, start_q, next_q) in open_edges {
-        let who_i_am = start_q.normalize_as_top_face().hash_key();
-        let what_i_want = next_q.normalize_as_top_face().hash_key();
+    for OpenEdge { edge, from, to } in open_edges {
+        let who_i_am = from.normalize_as_top_face().hash_key();
+        let what_i_want = to.normalize_as_top_face().hash_key();
         let counterpart_key = (what_i_want, who_i_am);
         let other_edge = match m.get(&counterpart_key) {
             Some(other_edge) => other_edge,
@@ -660,13 +681,7 @@ impl CubeWrapper {
         let face_size: i32 = faces
             .values()
             .iter()
-            .find_map(|x| {
-                if let Some(face) = x {
-                    Some(face.number_of_columns)
-                } else {
-                    None
-                }
-            })
+            .find_map(|x| x.as_ref().map(|face| face.number_of_columns))
             .unwrap();
 
         let mut rv = CubeWrapper {
@@ -775,13 +790,13 @@ impl Quat {
     fn multiply(left: [i8; 4], right: [i8; 4]) -> [i8; 4] {
         let [a1, b1, c1, d1] = left;
         let [a2, b2, c2, d2] = right;
-        let values = [
+
+        [
             a1 * a2 - b1 * b2 - c1 * c2 - d1 * d2,
             a1 * b2 + b1 * a2 + c1 * d2 - d1 * c2,
             a1 * c2 - b1 * d2 + c1 * a2 + d1 * b2,
             a1 * d2 + b1 * c2 - c1 * b2 + d1 * a2,
-        ];
-        values
+        ]
     }
 
     fn up(&self) -> Quat {
@@ -915,8 +930,8 @@ fn test_cube_folding() {
     let mut num_invalid = 0;
     for x in 0_u32..=0xffff_u32 {
         let m = Map::new(4, 4, &false).indexed_map(|(i, j), _| {
-            assert!(i >= 0 && i < 4);
-            assert!(j >= 0 && j < 4);
+            assert!((0..4).contains(&i));
+            assert!((0..4).contains(&j));
             let n: u32 = (i + j * 4).try_into().unwrap();
             let bit: u32 = 1 << n;
             (x & bit) != 0
@@ -924,10 +939,10 @@ fn test_cube_folding() {
         if m.values().iter().filter(|x| **x).count() != 6 {
             continue;
         }
-        if (0..4).all(|x| *m.at((x, 0)).unwrap() == false) {
+        if (0..4).all(|x| !(*m.at((x, 0)).unwrap())) {
             continue;
         }
-        if (0..4).all(|y| *m.at((0, y)).unwrap() == false) {
+        if (0..4).all(|y| !(*m.at((0, y)).unwrap())) {
             continue;
         }
 
@@ -965,7 +980,12 @@ fn main() -> Result<()> {
     let mut buffer = String::new();
     std::io::stdin().read_to_string(&mut buffer)?;
 
-    let (faces, steps, start, full_map) = parse_scenario(&buffer)?;
+    let Scenario {
+        face_map: faces,
+        instructions: steps,
+        start_state: start,
+        full_map,
+    } = parse_scenario(&buffer)?;
 
     let mut viz_map = full_map.clone();
     let mut current = start.associate_faces(&faces, FlatWrapper {});
@@ -977,7 +997,7 @@ fn main() -> Result<()> {
     }
     println!("Answer part A: {}", current.value());
 
-    let mut viz_map = full_map.clone();
+    let mut viz_map = full_map;
     let cube_wrapper = CubeWrapper::from(&faces)?;
     let mut current = start.associate_faces(&faces, cube_wrapper);
     for ins in &steps {
